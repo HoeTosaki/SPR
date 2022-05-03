@@ -1,0 +1,5 @@
+cora filter=lfs diff=lfs merge=lfs -text
+facebook filter=lfs diff=lfs merge=lfs -text
+GrQc filter=lfs diff=lfs merge=lfs -text
+DBLP filter=lfs diff=lfs merge=lfs -text
+youtube filter=lfs diff=lfs merge=lfs -text
