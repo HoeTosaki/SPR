@@ -110,8 +110,8 @@ class Graph():
 		assert is_directed == False
 
 		is_handled = False
-		if os.path.exists(self.out_file+"~0"):
-			is_handled = True
+		# if os.path.exists(self.out_file+"~0"):
+		# 	is_handled = True
 
 		self.__workers = 8
 		self.__edges = list(G.edges())
@@ -229,7 +229,7 @@ def alias_draw(J, q):
 
 
 if __name__ == '__main__':
-    g, _ = dgl.load_graphs('../datasets/dst/facebook')
+    g, _ = dgl.load_graphs('../datasets/dst/cora')
     g = g[0]
     encoder = Node2VecEncoder(g=g,emb_sz=128,workers=8,out_dir='../tmp',out_file='node2vec-encoder',force=True,num_walks=80,walk_lens=40,window_sz=20,p=1,q=1,iter=1,is_directed=False,is_weighted=False,weight_arr=None)
     st_time = time.time()

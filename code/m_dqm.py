@@ -1,3 +1,4 @@
+import dgl
 import numpy as np
 import networkx as nx
 import os
@@ -19,9 +20,11 @@ import karateclub as kc
 import gensim as gs
 import time
 import pickle as pk
+import tqdm
+from karateclub.utils.walker import BiasedRandomWalker
 
-device = tc.device('cuda:0' if tc.cuda.is_available() else 'cpu')
-
+# device = tc.device('cuda:0' if tc.cuda.is_available() else 'cpu')
+device = 'cpu'
 
 class DistanceQueryModel:
     def __init__(self,nx_g=None,model_name='dqm',tmp_dir='../tmp',force=False,**kwargs):
@@ -141,11 +144,12 @@ class ADO(DistanceQueryModel):
 
         for i in reversed((range(self.real_k))):
             # construct p(v).
+            print(f'{self} construct p(v)')
             if i != 0:
                 trace_map = -np.ones(shape=(num_nodes,)).astype(dtype=np.int32)
                 dist_map = -np.ones(shape=(num_nodes,)).astype(dtype=np.int8)
                 search_lst = []
-                for nid in self.As[i]:
+                for nid in tqdm.tqdm(self.As[i]):
                     trace_map[nid] = nid # store from which of w does nid step from.
                     dist_map[nid] = 0 # store distance to s (any w).
                     search_lst.append(nid)
@@ -166,7 +170,8 @@ class ADO(DistanceQueryModel):
                 self.ps[i] = np.array(lst_nodes).astype(dtype=np.int32) # self loop at 0 index.
                 self.deltas[i] = np.zeros(shape=(num_nodes,)).astype(dtype=np.int8)
             # construct c(w).
-            for w in self.As[i]:
+            print(f'{self} construct c(w)')
+            for w in tqdm.tqdm(self.As[i]):
                 w = int(w)
                 if w in self.c:
                     continue # has been traversed in A_{i+1}.
@@ -189,8 +194,9 @@ class ADO(DistanceQueryModel):
                 self.w2v2d[w] = dist_map2
 
         # construct b(v).
+        print(f'{self} construct b(v)')
         self.b = {}
-        for w in self.c:
+        for w in tqdm.tqdm(self.c):
             w = int(w)
             for nid in self.c[w]:
                 nid = int(nid)
@@ -326,6 +332,7 @@ class LandmarkSelection(DistanceQueryModel):
 
         self.train_var_lst = []
         landmarks = []
+        print(f'{self} select landmarks')
         if self.use_partition is None:
             num_nodes = self.nx_g.number_of_nodes()
             deg_nodes = self._sel_nodes()
@@ -335,7 +342,7 @@ class LandmarkSelection(DistanceQueryModel):
                 idx_deg = list(range(num_nodes))
                 random.shuffle(idx_deg)
                 idx_deg = np.array(idx_deg)
-            for i in range(num_nodes):
+            for i in tqdm.tqdm(range(num_nodes)):
                 if i == self.landmark_sz:
                     break
                 assert deg_nodes[idx_deg[i]] != 0 # assert connected graph.
@@ -374,7 +381,8 @@ class LandmarkSelection(DistanceQueryModel):
 
         # calculate dist from landmarks to any nodes.
         self.v2emb = {}
-        for lid in landmarks:
+        print(f'{self} construct landmark coordinate')
+        for lid in tqdm.tqdm(landmarks):
             dist_map = {lid:0}
             search_lst = [lid]
             while len(search_lst) > 0:
@@ -639,7 +647,7 @@ class Orion(DistanceQueryModel):
 
     def _gen_dist_map(self,landmarks):
         dist_maps = {}
-        for nid in landmarks:
+        for nid in tqdm.tqdm(landmarks):
             dist_map = {nid:0}
             search_lst = [nid]
             while len(search_lst) != 0:
@@ -1331,10 +1339,35 @@ class DADL(DistanceQueryModel):
 
         print('{} start to train embeddings with Node2Vec...'.format(self))
         st_time = time.time()
-        n2v = kc.Node2Vec(walk_number=self.num_walks,walk_length=self.l,p=self.p,q=self.q,dimensions=self.emb_sz,workers=self.num_workers,min_count=self.k)
-        n2v.fit(self.nx_g)
-        self.embs = n2v.get_embedding()
-        self.embs = tc.FloatTensor(self.embs)
+        # walker = BiasedRandomWalker(self.l, self.num_walks, self.p, self.q)
+        # walker.do_walks(self.nx_g)
+        # model = Word2Vec(
+        #     walker.walks,
+        #     hs=1,
+        #     alpha=self.learning_rate,
+        #     epochs=self.epochs,
+        #     vector_size=self.dimensions,
+        #     window=self.window_size,
+        #     min_count=self.min_count,
+        #     workers=self.workers,
+        #     seed=self.seed,
+        # )
+        # n2v = kc.Node2Vec(walk_number=self.num_walks,walk_length=self.l,p=self.p,q=self.q,dimensions=self.emb_sz,workers=self.num_workers,min_count=self.k)
+        # n2v.fit(self.nx_g)
+        # self.embs = n2v.get_embedding()
+        # self.embs = tc.FloatTensor(self.embs)
+        # model = gs.models.Word2Vec(walker.walks, vector_size=self.emb_sz, window=5, min_count=0, sg=1,workers=self.num_workers)
+        # model = gs.models.Word2Vec(walks, vector_size=self.emb_sz, window=walks.shape[0], min_count=0, sg=1, hs=0, negative=5,workers=self.num_workers)
+        # self.embs = tc.FloatTensor([model.wv[str(ele)] for ele in range(len(nodes))])
+        encoder = m_node2vec.Node2VecEncoder(g=dgl.from_networkx(self.nx_g), emb_sz=self.emb_sz, workers=self.num_workers, out_dir='../tmp', out_file='node2vec-encoder', force=True,
+                                  num_walks=self.num_walks, walk_lens=self.l, window_sz=10, p=1, q=1, iter=1, is_directed=False,
+                                  is_weighted=False, weight_arr=None)
+        st_time = time.time()
+        encoder.train()
+        out_g = encoder.load()
+        self.embs = out_g.ndata['emb']
+        print('encoder consume {:.2f}'.format(time.time() - st_time))
+
         print('{} train embeddings finished with time {:.4f}s'.format(self,time.time()-st_time))
 
         # train NN.

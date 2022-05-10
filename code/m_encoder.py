@@ -196,6 +196,7 @@ class Node2VecEncoder(Encoder):
             for edge in nx_G.edges():
                 # print((edge[0],edge[1],1))
                 new_nx_G.add_weighted_edges_from(ebunch_to_add = [(edge[0],edge[1],1)],weight='weight')
+                new_nx_G.add_weighted_edges_from(ebunch_to_add = [(edge[1],edge[0],1)],weight='weight')
                 # nx_G.edges[edge[0]][edge[1]]['weight'] = 1
             nx_G = new_nx_G
         else:
@@ -203,7 +204,7 @@ class Node2VecEncoder(Encoder):
             raise NotImplementedError
         new_node,new_edge = nx_G.number_of_nodes(),nx_G.number_of_edges()
         print('\tnew node', new_node, 'edge', new_edge)
-        assert new_node == org_node and new_edge == org_edge
+        # assert new_node == org_node and new_edge == org_edge
 
         self.G = m_node2vec.Graph(nx_G=nx_G, is_directed=self.is_directed,p=self.p,q=self.q,out_file=os.path.join(self.out_dir,self.out_file)+'.prob')
 
