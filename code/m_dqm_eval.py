@@ -20,6 +20,7 @@ class DistanceQueryEval:
     def evaluate(self):
         for dqm in self.dqms:
             print('[{}] - [{}]'.format(self,dqm))
+            dqm.force = self.force
             if self.seed is not None:
                 random.seed(self.seed)
                 np.random.seed(self.seed)
