@@ -1456,7 +1456,7 @@ class DADL(DistanceQueryModel):
     def _save_param_pickle(self):
         with open(self.pwd() + '.pkl', 'wb') as f:
             pk.dump(self.embs, f)
-            pk.dump(self.model,f)
+            pk.dump(self.model, f)
 
     def _load_param_pickle(self):
         with open(self.pwd() + '.pkl', 'rb') as f:

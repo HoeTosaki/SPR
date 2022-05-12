@@ -145,7 +145,7 @@ class Graph():
 					lst4 = np.array([float(ele) for ele in line_5.split(',')])
 					alias_edges[(src,dst)] = (lst1,lst2)
 					alias_edges[(dst,src)] = (lst3,lst4)
-		print(alias_edges.keys())
+		# print(alias_edges.keys())
 		print('\tall read finished.')
 
 		''' parallel mod'''

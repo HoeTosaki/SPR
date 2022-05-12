@@ -5,6 +5,7 @@ import m_generator
 import numpy as np
 import pandas as pd
 import time
+import math
 import m_generator
 
 
@@ -478,15 +479,16 @@ def combine_routine_eval_large1():
         'q': 1,
         'l': 40,
         'k': 1,
-        'num_walks': 12,
-        'num_workers': 12,
+        'num_walks': 16,
+        'num_workers': 8,
         'batch_landmark_sz': 1,
     }
 
     # model_names = ['ado','ls','pll','orion','rigel','dadl']
     model_names = ['dadl']
 
-    routine_eval(data_names=['yt'], dqm_names=model_names, add_names=['def']*len(model_names), params=[hyper_dict[ele] for ele in model_names], eval_type='all')
+    routine_eval(data_names=['db'], dqm_names=model_names, add_names=['def']*len(model_names), params=[hyper_dict[ele] for ele in model_names], eval_type='all',seed=189)
+    # routine_eval(data_names=['yt'], dqm_names=model_names, add_names=['def']*len(model_names), params=[hyper_dict[ele] for ele in model_names], eval_type='all',seed=189)
 
 def routine_ft_bcdr_large():
     comm_dict = {
@@ -626,6 +628,18 @@ def routine_ver_bcdr_large():
 
     routine_eval(data_names=['yt'], dqm_names=['bcdr']*len(add_names), add_names=add_names, params=params[:len(add_names)], eval_type='query',seed=198)
 
+def routine_sim_bn_test():
+    ps = [(ele+1) / 20 for ele in range(20)]
+    node_szs = [int(math.pow(2,ele+1)) for ele in range(20)]
+    for idx,node_sz in enumerate(node_szs):
+        for idy,p in enumerate(ps):
+            print(f'computing p={p},node_sz={node_sz}...')
+            m_dqm_eval.gen_bn_graph(f'bn_p_{p}_nsz_{node_sz}',node_sz=node_sz,p=p,num_workers=8)
+
+
+
+
+
 
 if __name__ == '__main__':
     print('hello dqm routine.')
@@ -652,3 +666,5 @@ if __name__ == '__main__':
     # g = dgl.to_simple_graph(g)
     # bfs = m_generator.BFS(g)
     # print(bfs.dist_between(29,84))
+
+    routine_sim_bn_test()
