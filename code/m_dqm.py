@@ -1360,7 +1360,7 @@ class DADL(DistanceQueryModel):
         # model = gs.models.Word2Vec(walks, vector_size=self.emb_sz, window=walks.shape[0], min_count=0, sg=1, hs=0, negative=5,workers=self.num_workers)
         # self.embs = tc.FloatTensor([model.wv[str(ele)] for ele in range(len(nodes))])
         encoder = m_node2vec.Node2VecEncoder(g=dgl.from_networkx(self.nx_g), emb_sz=self.emb_sz, workers=self.num_workers, out_dir='../tmp', out_file='node2vec-encoder', force=True,
-                                  num_walks=self.num_walks, walk_lens=self.l, window_sz=10, p=1, q=1, iter=1, is_directed=False,
+                                  num_walks=self.num_walks, walk_lens=self.l, window_sz=self.l, p=1, q=1, iter=1, is_directed=False,
                                   is_weighted=False, weight_arr=None)
         st_time = time.time()
         encoder.train()
@@ -1456,10 +1456,12 @@ class DADL(DistanceQueryModel):
     def _save_param_pickle(self):
         with open(self.pwd() + '.pkl', 'wb') as f:
             pk.dump(self.embs, f)
+            pk.dump(self.model, f)
 
     def _load_param_pickle(self):
         with open(self.pwd() + '.pkl', 'rb') as f:
             self.embs = pk.load(f)
+            self.model = pk.load(f)
 
     def _load_param(self):
         with open(self.pwd() + '.json', 'r') as f:
@@ -1710,10 +1712,12 @@ class BCDR(DistanceQueryModel):
     def _save_param_pickle(self):
         with open(self.pwd() + '.pkl', 'wb') as f:
             pk.dump(self.embs, f)
+            pk.dump(self.model,f)
 
     def _load_param_pickle(self):
         with open(self.pwd() + '.pkl', 'rb') as f:
             self.embs = pk.load(f)
+            self.model = pk.load(f)
 
 
     def _load_param(self):

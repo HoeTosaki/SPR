@@ -5,6 +5,7 @@ import time
 import memory_profiler as mem_profile
 import random
 import numpy as np
+import utils
 
 class DistanceQueryEval:
     def __init__(self,nx_g=None,dqms=None,generator=None,eval_name='dq-eval',tmp_dir='../log',force=False,seed=None):
@@ -120,7 +121,30 @@ class DistOfflineEval(DistanceQueryEval):
             'storage': total_storage,
         }
 
+def _th_gen_bn_graph(node_seq,p,node_sz,**kwargs):
+    ret_lst = []
+    for nid in node_seq:
+        adj_arr = np.random.random(size=(node_sz,)) < p
+        for idx,ele in enumerate(adj_arr):
+            if ele == True and idx != nid:
+                ret_lst.append(f'{nid}\t{idx}\n')
+    return ret_lst
 
+def gen_bn_graph(graph_name,node_sz,p=0.5,num_workers=8):
+    mpm = utils.MPManager(batch_sz=max(min(2048,node_sz),int(node_sz//64)), num_workers=num_workers, use_shuffle=False)
+    ret_dict = mpm.multi_proc(_th_gen_bn_graph, [list(range(node_sz))], p=p,node_sz=node_sz, auto_concat=False)
+    with open(f'../tmp/{graph_name}.edgelist','w') as f:
+        for k,v in ret_dict.items():
+            f.writelines(v)
+            f.flush()
+
+
+
+
+if __name__ == '__main__':
+    a = np.random.random(size=(10,)) < 0.5
+    print(a)
+    print(a[1]==False)
 
 
 
