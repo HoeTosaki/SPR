@@ -4,11 +4,12 @@ import dgl
 import dgl.nn as gnn
 import dgl.function as gF
 import m_generator
+import os
 
 def showDataInfo():
     # datasets = ['../datasets/dst/karate','../datasets/dst/cora','../datasets/dst/facebook','../datasets/dst/GrQc','../datasets/dst/NotreDame','../datasets/dst/DBLP', '../datasets/dst/BlogCatalog-dataset', '../datasets/dst/twitter',
     #             '../datasets/dst/youtube']
-    datasets = ['../datasets/dst/cora','../datasets/dst/facebook','../datasets/dst/GrQc','../datasets/dst/NotreDame','../datasets/dst/DBLP']
+    datasets = ['../datasets/dst/cora','../datasets/dst/facebook','../datasets/dst/GrQc','../datasets/dst/DBLP','../datasets/dst/Youtube']
 
     for dataset in datasets:
         g, _ = dgl.load_graphs(dataset)
@@ -18,20 +19,24 @@ def showDataInfo():
         n_cnt = 0
         sum_BC = 0
         n_sz = g.num_nodes()
-        with open(dataset+'-BC.txt','r') as f:
-            for line in f.readlines():
-                line = line.strip()
-                if line is None or line == '':
-                    continue
-                # print(line)
-                src,dst = line.split('-',1)
-                src = int(src)
-                dst = float(dst)
-                dst /= n_sz
-                max_BC = max(max_BC,dst)
-                min_BC = min(min_BC,dst)
-                n_cnt += 1
-                sum_BC += dst
+        if os.path.exists(dataset+'-BC.txt'):
+            with open(dataset+'-BC.txt','r') as f:
+                for line in f.readlines():
+                    line = line.strip()
+                    if line is None or line == '':
+                        continue
+                    # print(line)
+                    src,dst = line.split('-',1)
+                    src = int(src)
+                    dst = float(dst)
+                    dst /= n_sz
+                    max_BC = max(max_BC,dst)
+                    min_BC = min(min_BC,dst)
+                    n_cnt += 1
+                    sum_BC += dst
+        else:
+            n_cnt = 1
+            n_sz = 1
         print(dataset,'node_sz',g.num_nodes(),',edge_sz',g.num_edges(),'e/n ratio',g.num_edges() / g.num_nodes(),'RoBC',max_BC-min_BC,'mBC',sum_BC / n_cnt)
         assert n_sz == n_cnt, print('n_sz:{}, n_cnt:{}'.format(n_sz,n_cnt))
 
