@@ -1,3 +1,5 @@
+import tqdm
+
 import m_dqm
 import m_dqm_eval
 import dgl
@@ -7,7 +9,7 @@ import pandas as pd
 import time
 import math
 import m_generator
-
+import random
 
 datasets = ['../datasets/dst/cora', '../datasets/dst/facebook', '../datasets/dst/GrQc','../datasets/dst/DBLP','../datasets/dst/youtube','../datasets/dst/Pokec']
 
@@ -252,7 +254,7 @@ def combine_routine_eval1():
     hyper_dict = {}
     hyper_dict['ado'] ={'k':2}
     hyper_dict['ls'] = {
-        'landmark_sz': 16,
+        'landmark_sz': 128,
         'use_sel': 'random',
         'margin': 2,
         'use_partition': None,
@@ -285,7 +287,7 @@ def combine_routine_eval1():
 
     hyper_dict['dadl'] = {
         'emb_sz': 16,
-        'landmark_sz': 5,
+        'landmark_sz':  24,
         'lr': 0.01,
         'iters': 15,
         'p': 1,
@@ -297,24 +299,24 @@ def combine_routine_eval1():
         'batch_landmark_sz': 1,
     }
 
-    hyper_dict['bcdr'] = {
-        'emb_sz': 16,
-        'landmark_sz': 80,
-        'lr': 0.01,
-        'iters': 15,
-        'p': 1,
-        'q': 1,
-        'l': 40,
-        'k': 1,
-        'num_walks': 20,
-        'num_workers': 8,
-        'batch_landmark_sz': 10,
-        'batch_root_sz': 100,
-        'bc_decay': 10,
-        'dist_decay': 0.98,
-        'out_walks': 40,
-        'out_l': 10,
-    }
+    # hyper_dict['bcdr'] = {
+    #     'emb_sz': 16,
+    #     'landmark_sz': 80,
+    #     'lr': 0.01,
+    #     'iters': 15,
+    #     'p': 1,
+    #     'q': 1,
+    #     'l': 40,
+    #     'k': 1,
+    #     'num_walks': 20,
+    #     'num_workers': 8,
+    #     'batch_landmark_sz': 10,
+    #     'batch_root_sz': 100,
+    #     'bc_decay': 10,
+    #     'dist_decay': 0.98,
+    #     'out_walks': 40,
+    #     'out_l': 10,
+    # }
 
     model_names = ['ado','ls','pll','orion','rigel','dadl']
     routine_eval(data_names=['cr', 'fb', 'gq'], dqm_names=model_names, add_names=['def']*len(model_names), params=[hyper_dict[ele] for ele in model_names], eval_type='all')
@@ -630,16 +632,38 @@ def routine_ver_bcdr_large():
 
 def routine_sim_bn_test():
     ps = [(ele+1) / 20 for ele in range(20)]
-    node_szs = [int(math.pow(2,ele+1)) for ele in range(20)]
+    node_szs = [int(math.pow(2,ele+1)) for ele in range(14,20)]
     for idx,node_sz in enumerate(node_szs):
         for idy,p in enumerate(ps):
             print(f'computing p={p},node_sz={node_sz}...')
-            m_dqm_eval.gen_bn_graph(f'bn_p_{p}_nsz_{node_sz}',node_sz=node_sz,p=p,num_workers=8)
+            m_dqm_eval.gen_bn_graph(f'bn_p_{p}_nsz_{node_sz}',node_sz=node_sz,p=p,num_workers=10)
 
-
-
-
-
+def routine_bfs_time():
+    time_dict = {}
+    for data_name in ['cr','fb','gq','db','yt']:
+        g, _ = dgl.load_graphs(name2path[data_name])
+        g = g[0]
+        g = dgl.to_simple_graph(g)
+        g = dgl.to_bidirected(g)
+        nx_g = dgl.to_networkx(g)
+        bfss = []
+        print(f'start to perform bfs on {data_name}...')
+        for _ in tqdm.tqdm(range(5)):
+            bfs = time.time()
+            pnt = random.choice(list(nx_g.nodes()))
+            dist_map = {pnt: 0}
+            search_lst = [pnt]
+            while len(search_lst) > 0:
+                cur_nid = search_lst.pop(0)
+                for nnid in nx_g.neighbors(cur_nid):
+                    if nnid not in dist_map:
+                        dist_map[nnid] = dist_map[cur_nid] + 1
+                        search_lst.append(nnid)
+            bfs = time.time() - bfs
+            bfss.append(bfs)
+        time_dict[data_name] = sum(bfss) / len(bfss)
+        print(time_dict)
+    print(time_dict)
 
 if __name__ == '__main__':
     print('hello dqm routine.')
@@ -652,11 +676,11 @@ if __name__ == '__main__':
     # routine_eval_sampg()
     # routine_eval_dadl()
     # routine_eval_bcdr()
-    # combine_routine_eval1()
+    combine_routine_eval1()
     # routine_ft_bcdr()
     # routine_ver_bcdr()
     # routine_ft_bcdr_large()
-    routine_ver_bcdr_large()
+    # routine_ver_bcdr_large()
     # combine_routine_eval_large1()
     # dump_edge(data_names=['cr','fb','gq','db','yt','pk'])
 
@@ -667,4 +691,7 @@ if __name__ == '__main__':
     # bfs = m_generator.BFS(g)
     # print(bfs.dist_between(29,84))
 
-    routine_sim_bn_test()
+    # routine_sim_bn_test()
+    # m_dqm_eval.gen_fake_emb_query(node_szs=[int(math.pow(2,ele+1)) for ele in range(0,20)],ps=[(ele+1) / 20 for ele in range(20)])
+    # m_dqm_eval.gen_fake_bcdr(node_szs=[int(math.pow(2,ele+1)) for ele in range(0,20)])
+    # routine_bfs_time()

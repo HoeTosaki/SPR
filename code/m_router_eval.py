@@ -787,5 +787,4 @@ if __name__ == '__main__':
     # anal_path_m_peek(data_names=['cr','fb','gq'],encoder_names=['bcdr','dadl','n2v','dw'],route_modes=['basic-bdd','rigel-path'],route_mode_names=['BDD','RP'])
 
     anal_path_m_peek_ext(data_names=['cr','fb','gq'],encoder_names=['bcdr','dadl','n2v','dw'],route_modes=['basic-bdd','rigel-path'],route_mode_names=['BDD','RP'])
-
     # 3*4*2*3*8

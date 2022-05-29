@@ -24,6 +24,8 @@ from utils import *
 import m_logger
 import m_deepwalk
 import fileinput
+import pickle as pk
+import tqdm
 
 plt.rcParams['axes.unicode_minus']=False
 '''
@@ -40,72 +42,97 @@ glb_embed = {}
 '''
 generate test graph.
 '''
-def gen_random_graph(regular=20,node_sz=100,st_id=0,name='test',out_dir='../fig',is_print=True):
-    G = nx.DiGraph()
-    for i in range(st_id,st_id + node_sz):
-        G.add_node(i)
-    node_lst = list(G.nodes())
-    for i in range(st_id,st_id+node_sz):
-        cnt = 0
-        while cnt < regular:
-            dst = random.choice(node_lst)
-            if dst != i and not G.has_edge(i,dst):
-                if not G.has_edge(dst,i):
-                    # avoid to generate double edges in G.edges.
-                    G.add_edge(i, dst)
-                cnt += 1
+def gen_random_graph(regular=20,node_sz=100,st_id=0,name='test',out_dir='../fig',is_print=True,force=True,no_save=False):
+    cur_path = os.path.join(out_dir,f'rand_r_{regular}_nsz_{node_sz}_sid_{st_id}_nm_{name}.nxgraph.pkl')
+    if not force and os.path.exists(cur_path):
+        with open(cur_path,'rb') as f:
+            G = pk.load(f)
+    else:
+        G = nx.DiGraph()
+        for i in range(st_id,st_id + node_sz):
+            G.add_node(i)
+        node_lst = list(G.nodes())
+        for i in range(st_id,st_id+node_sz):
+            cnt = 0
+            while cnt < regular:
+                dst = random.choice(node_lst)
+                if dst != i and not G.has_edge(i,dst):
+                    if not G.has_edge(dst,i):
+                        # avoid to generate double edges in G.edges.
+                        G.add_edge(i, dst)
+                    cnt += 1
+        if not no_save:
+            with open(cur_path,'wb') as f:
+                pk.dump(G,f)
     if is_print:
         drawG(G)
         plt.savefig(os.path.join(out_dir,name+'-graph.pdf'))
         plt.show()
     return nx.to_undirected(G)
 
-def gen_comm_graph(cls_sz=100,conn_sz = 2,regular=20,node_sz=100,name='test',out_dir='../fig',is_print=True):
-    G = nx.DiGraph()
-    for cid in range(cls_sz):
-        node_lst = list(G.nodes())
-        subG = gen_random_graph(regular=regular,st_id=len(node_lst),node_sz=node_sz,is_print=False)
-        # G = nx.union(G, subG,rename=('','G'+str(cid)+'-'))
-        G = nx.union(G, subG)
-        if len(node_lst) > 0:
-            random.shuffle(node_lst)
-            conn_ids = node_lst[:conn_sz]
-            for conn_id in conn_ids:
-                # G.add_edge(conn_id,'G'+str(cid)+'-' + str(random.choice(list(subG.nodes()))))
-                G.add_edge(conn_id,random.choice(list(subG.nodes())))
-
-    drawG(G)
-    plt.savefig(os.path.join(out_dir,name+'-graph.pdf'))
+def gen_comm_graph(cls_sz=100,conn_sz = 2,regular=20,node_sz=100,name='test',out_dir='../fig',is_print=True,force=True,no_save=False):
+    cur_path = os.path.join(out_dir, f'comm_csz_{cls_sz}_conn_{conn_sz}_r_{regular}_nsz_{node_sz}_nm_{name}.nxgraph.pkl')
+    if not force and os.path.exists(cur_path):
+        with open(cur_path, 'rb') as f:
+            G = pk.load(f)
+    else:
+        G = nx.DiGraph()
+        for cid in range(cls_sz):
+            node_lst = list(G.nodes())
+            subG = gen_random_graph(regular=regular,st_id=len(node_lst),node_sz=node_sz,is_print=False,no_save=True)
+            # G = nx.union(G, subG,rename=('','G'+str(cid)+'-'))
+            G = nx.union(G, subG)
+            if len(node_lst) > 0:
+                random.shuffle(node_lst)
+                conn_ids = node_lst[:conn_sz]
+                for conn_id in conn_ids:
+                    # G.add_edge(conn_id,'G'+str(cid)+'-' + str(random.choice(list(subG.nodes()))))
+                    G.add_edge(conn_id,random.choice(list(subG.nodes())))
+        if not no_save:
+            with open(cur_path,'wb') as f:
+                pk.dump(G,f)
     if is_print:
+        drawG(G)
+        plt.savefig(os.path.join(out_dir, name + '-graph.pdf'))
         plt.show()
     return nx.to_undirected(G)
 
-def gen_circle_graph(circle_num=10,circle_sz = [5,20],conn_sz = 2,name='circle',out_dir='../fig',is_print=True):
-    G = nx.DiGraph()
-    def _gen_one_circle(circle_sz,st_id):
+def gen_circle_graph(circle_num=10,circle_sz = [5,20],conn_sz = 2,name='circle',out_dir='../fig',is_print=True,force=True,no_save=False):
+    cur_path = os.path.join(out_dir,f'CG_cnum_{circle_num}_csz_{circle_sz}_conn_{conn_sz}_nm_{name}.nxgraph.pkl')
+    if not force and os.path.exists(cur_path):
+        print(f'load CG from {cur_path}')
+        with open(cur_path, 'rb') as f:
+            G = pk.load(f)
+    else:
+        print(f'construc CG save to {cur_path}')
         G = nx.DiGraph()
-        for i in range(st_id, st_id + circle_sz):
-            G.add_node(i)
-        node_lst = list(G.nodes())
-        for i in range(st_id, st_id + circle_sz):
-            if i != st_id + circle_sz - 1:
-                G.add_edge(i,i+1)
-            else:
-                G.add_edge(i, st_id)
-        return nx.to_undirected(G)
-    for cid in range(circle_num):
-        node_lst = list(G.nodes())
-        subG = _gen_one_circle(random.randint(circle_sz[0],circle_sz[1]),st_id=len(node_lst))
-        G = nx.union(G, subG)
-        if len(node_lst) > 0:
-            cur_node_lst = node_lst.copy()
-            random.shuffle(cur_node_lst)
-            conn_ids = cur_node_lst[:conn_sz]
-            for conn_id in conn_ids:
-                G.add_edge(conn_id,random.choice(list(subG.nodes())))
-    drawG(G)
-    plt.savefig(os.path.join(out_dir, name + '-graph.pdf'))
+        def _gen_one_circle(circle_sz,st_id):
+            G = nx.DiGraph()
+            for i in range(st_id, st_id + circle_sz):
+                G.add_node(i)
+            node_lst = list(G.nodes())
+            for i in range(st_id, st_id + circle_sz):
+                if i != st_id + circle_sz - 1:
+                    G.add_edge(i,i+1)
+                else:
+                    G.add_edge(i, st_id)
+            return nx.to_undirected(G)
+        for cid in range(circle_num):
+            node_lst = list(G.nodes())
+            subG = _gen_one_circle(random.randint(circle_sz[0],circle_sz[1]),st_id=len(node_lst))
+            G = nx.union(G, subG)
+            if len(node_lst) > 0:
+                cur_node_lst = node_lst.copy()
+                random.shuffle(cur_node_lst)
+                conn_ids = cur_node_lst[:conn_sz]
+                for conn_id in conn_ids:
+                    G.add_edge(conn_id,random.choice(list(subG.nodes())))
+        if not no_save:
+            with open(cur_path,'wb') as f:
+                pk.dump(G,f)
     if is_print:
+        drawG(G)
+        plt.savefig(os.path.join(out_dir, name + '-graph.pdf'))
         plt.show()
     return nx.to_undirected(G)
 
@@ -191,153 +218,192 @@ def gen_circleX_graph(circle_num=10,circle_sz = [5,20],conn_sz = 1,cross_num=0,i
     else:
         return nx.to_undirected(G)
 
-def gen_triangle_graph(triangle_sz = [3,6],conn_sz=1,traingle_num=100,name='triangle',out_dir='../fig',is_print=True):
-    G = nx.DiGraph()
-
-    for cid in range(traingle_num):
-        node_lst = list(G.nodes())
-        cur_triangle_sz = random.randint(triangle_sz[0], triangle_sz[1])
-        if cid == 0:
-            new_nodes = list(range(cur_triangle_sz))
-            new_triangle_nodes = new_nodes
-        else:
-            new_nodes = list(range(len(node_lst),len(node_lst) + cur_triangle_sz - conn_sz))
-            new_triangle_nodes = list(range(len(node_lst) - conn_sz,len(node_lst) + cur_triangle_sz - conn_sz))
-        for nn in new_nodes:
-            G.add_node(nn)
-        for idx,i in enumerate(new_triangle_nodes):
-            for j in new_triangle_nodes[idx + 1:]:
-                G.add_edge(i,j)
-    drawG(G)
-    plt.savefig(os.path.join(out_dir, name + '-graph.pdf'))
-    if is_print:
-        plt.show()
-    return nx.to_undirected(G)
-
-def gen_tricircle_graph(circle_num=10,triangle_sz = [3,6],conn_sz=1,traingle_num=20,name='tricircle',out_dir='../fig',is_print=True):
-    G = nx.DiGraph()
-
-    def _gen_one_circle(st_id,triangle_sz,conn_sz,traingle_num):
+def gen_triangle_graph(triangle_sz = [3,6],conn_sz=1,traingle_num=100,name='triangle',out_dir='../fig',is_print=True,force=True,no_save=False):
+    cur_path = os.path.join(out_dir, f'TG_tsz_{triangle_sz}_conn_{conn_sz}_tnum_{traingle_num}_nm_{name}.nxgraph.pkl')
+    if not force and os.path.exists(cur_path):
+        print(f'load TG from {cur_path}')
+        with open(cur_path, 'rb') as f:
+            G = pk.load(f)
+    else:
         G = nx.DiGraph()
         for cid in range(traingle_num):
             node_lst = list(G.nodes())
-            node_lst = [ele - st_id for ele in node_lst]
             cur_triangle_sz = random.randint(triangle_sz[0], triangle_sz[1])
             if cid == 0:
                 new_nodes = list(range(cur_triangle_sz))
                 new_triangle_nodes = new_nodes
-            elif cid == traingle_num - 1:
-                new_nodes = list(range(len(node_lst), len(node_lst) + cur_triangle_sz - 2 * conn_sz))
-                new_triangle_nodes = list(range(len(node_lst) - conn_sz, len(node_lst) + cur_triangle_sz - 2 * conn_sz))
-                new_triangle_nodes.extend(list(range(conn_sz)))
             else:
-                new_nodes = list(range(len(node_lst), len(node_lst) + cur_triangle_sz - conn_sz))
-                new_triangle_nodes = list(range(len(node_lst) - conn_sz, len(node_lst) + cur_triangle_sz - conn_sz))
-
+                new_nodes = list(range(len(node_lst),len(node_lst) + cur_triangle_sz - conn_sz))
+                new_triangle_nodes = list(range(len(node_lst) - conn_sz,len(node_lst) + cur_triangle_sz - conn_sz))
             for nn in new_nodes:
-                G.add_node(nn + st_id)
-            for idx, i in enumerate(new_triangle_nodes):
+                G.add_node(nn)
+            for idx,i in enumerate(new_triangle_nodes):
                 for j in new_triangle_nodes[idx + 1:]:
-                    G.add_edge(i+st_id, j+st_id)
-
-        return nx.to_undirected(G)
-    for cid in range(circle_num):
-        node_lst = list(G.nodes())
-        subG = _gen_one_circle(st_id=len(node_lst),triangle_sz=triangle_sz,conn_sz=conn_sz,traingle_num=traingle_num)
-        G = nx.union(G, subG)
-        if len(node_lst) > 0:
-            cur_node_lst = node_lst.copy()
-            random.shuffle(cur_node_lst)
-            conn_ids = cur_node_lst[:conn_sz]
-            for conn_id in conn_ids:
-                G.add_edge(conn_id,random.choice(list(subG.nodes())))
-
-    drawG(G)
-    plt.savefig(os.path.join(out_dir, name + '-graph.pdf'))
+                    G.add_edge(i,j)
+        if not no_save:
+            with open(cur_path,'wb') as f:
+                pk.dump(G,f)
     if is_print:
+        drawG(G)
+        plt.savefig(os.path.join(out_dir, name + '-graph.pdf'))
         plt.show()
     return nx.to_undirected(G)
 
-def gen_tree_graph(child_sz=[1,5],extend_decay = 0.9,max_depth=10,name='tree',out_dir='../fig',is_print=True):
-    G = nx.DiGraph()
-    G.add_node(0)
-    open_lst = [(0,extend_decay)]
-    min_prob = math.pow(extend_decay,max_depth)
-    while len(open_lst) != 0:
-        cur_root,cur_prob = open_lst.pop(0)
-        if random.uniform(0,1) < cur_prob and cur_prob > min_prob:
-            node_lst = list(G.nodes())
-            child_nodes = list(range(len(node_lst),len(node_lst) + random.randint(child_sz[0],child_sz[1])))
-            for child_node in child_nodes:
-                G.add_node(child_node)
-                G.add_edge(cur_root,child_node)
-                open_lst.append((child_node,cur_prob*extend_decay))
-
-    drawG(G)
-    plt.savefig(os.path.join(out_dir, name + '-graph.pdf'))
-    if is_print:
-        plt.show()
-    return nx.to_undirected(G)
-
-def gen_spiral_graph(circle_expend=10,st_circle_sz=10,conn_sz = 5,name='circle',out_dir='../fig',is_print=True):
-    G = nx.DiGraph()
-
-    def _gen_one_line(line_sz,st_id):
+def gen_tricircle_graph(circle_num=10,triangle_sz = [3,6],conn_sz=1,traingle_num=20,name='tricircle',out_dir='../fig',is_print=True,force=True,no_save=False):
+    cur_path = os.path.join(out_dir, f'TCG_cnum_{circle_num}_tsz_{triangle_sz}_conn_{conn_sz}_tnum_{traingle_num}_nm_{name}.nxgraph.pkl')
+    if not force and os.path.exists(cur_path):
+        print(f'load TCG from {cur_path}')
+        with open(cur_path, 'rb') as f:
+            G = pk.load(f)
+    else:
         G = nx.DiGraph()
-        for i in range(st_id, st_id + line_sz):
-            G.add_node(i)
-        node_lst = list(G.nodes())
-        for i in range(st_id, st_id + line_sz-1):
-            G.add_edge(i,i+1)
-        return nx.to_undirected(G)
+        def _gen_one_circle(st_id,triangle_sz,conn_sz,traingle_num):
+            G = nx.DiGraph()
+            for cid in range(traingle_num):
+                node_lst = list(G.nodes())
+                node_lst = [ele - st_id for ele in node_lst]
+                cur_triangle_sz = random.randint(triangle_sz[0], triangle_sz[1])
+                if cid == 0:
+                    new_nodes = list(range(cur_triangle_sz))
+                    new_triangle_nodes = new_nodes
+                elif cid == traingle_num - 1:
+                    new_nodes = list(range(len(node_lst), len(node_lst) + cur_triangle_sz - 2 * conn_sz))
+                    new_triangle_nodes = list(range(len(node_lst) - conn_sz, len(node_lst) + cur_triangle_sz - 2 * conn_sz))
+                    new_triangle_nodes.extend(list(range(conn_sz)))
+                else:
+                    new_nodes = list(range(len(node_lst), len(node_lst) + cur_triangle_sz - conn_sz))
+                    new_triangle_nodes = list(range(len(node_lst) - conn_sz, len(node_lst) + cur_triangle_sz - conn_sz))
 
-    circle_ints = []
-    for cid in range(circle_expend):
-        node_lst = list(G.nodes())
-        subG = _gen_one_line(st_circle_sz + circle_expend * cid,st_id=len(node_lst))
-        G = nx.union(G, subG)
-        circle_ints.append((len(node_lst),len(node_lst) + st_circle_sz + circle_expend * cid))
-        # if len(node_lst) > 0:
-        #     cur_node_lst = node_lst.copy()
-        #     random.shuffle(cur_node_lst)
-        #     conn_ids = cur_node_lst[:conn_sz]
-        #     for conn_id in conn_ids:
-        #         G.add_edge(conn_id,random.choice(list(subG.nodes())))
-    node_lst = list(G.nodes())
-    for idx in range(1,len(circle_ints)):
-        n_st,n_ed = circle_ints[idx]
-        c_st,c_ed = circle_ints[idx-1]
-        conn_lst1 = node_lst[c_st:c_ed].copy()
-        conn_lst2 = node_lst[n_st:n_ed].copy()
-        random.shuffle(conn_lst1)
-        random.shuffle(conn_lst2)
-        conn_lst1 = list(sorted(conn_lst1[:conn_sz]))
-        conn_lst2 = list(sorted(conn_lst2[:conn_sz]))
-        for n1,n2 in zip(conn_lst1,conn_lst2):
-            G.add_edge(n1,n2)
+                for nn in new_nodes:
+                    G.add_node(nn + st_id)
+                for idx, i in enumerate(new_triangle_nodes):
+                    for j in new_triangle_nodes[idx + 1:]:
+                        G.add_edge(i+st_id, j+st_id)
 
-    drawG(G)
-    plt.savefig(os.path.join(out_dir, name + '-graph.pdf'))
+            return nx.to_undirected(G)
+        for cid in range(circle_num):
+            node_lst = list(G.nodes())
+            subG = _gen_one_circle(st_id=len(node_lst),triangle_sz=triangle_sz,conn_sz=conn_sz,traingle_num=traingle_num)
+            G = nx.union(G, subG)
+            if len(node_lst) > 0:
+                cur_node_lst = node_lst.copy()
+                random.shuffle(cur_node_lst)
+                conn_ids = cur_node_lst[:conn_sz]
+                for conn_id in conn_ids:
+                    G.add_edge(conn_id,random.choice(list(subG.nodes())))
+        if not no_save:
+            with open(cur_path,'wb') as f:
+                pk.dump(G,f)
     if is_print:
+        drawG(G)
+        plt.savefig(os.path.join(out_dir, name + '-graph.pdf'))
         plt.show()
     return nx.to_undirected(G)
 
-def gen_net_graph(net_shape=[100,200],edge_prob=0.99,name='net',out_dir='../fig',is_print=True):
-    G = nx.DiGraph()
-    m = net_shape[0]
-    n = net_shape[1]
-    for i in range(m):
-        for j in range(n):
-            G.add_node(n*i+j)
-    for i in range(m):
-        for j in range(n):
-            if j >= 1 and random.uniform(0,1) < edge_prob:
-                G.add_edge(i*n + j,i*n+j-1)
-            if i >= 1 and random.uniform(0, 1) < edge_prob:
-                G.add_edge(i * n + j, (i-1) * n + j)
-    drawG(G)
-    plt.savefig(os.path.join(out_dir, name + '-graph.pdf'))
+def gen_tree_graph(child_sz=[1,5],extend_decay = 0.9,max_depth=10,name='tree',out_dir='../fig',is_print=True,force=True,no_save=False):
+    cur_path = os.path.join(out_dir,f'TRG_csz_{child_sz}_ext_{extend_decay}_dep_{max_depth}_nm_{name}.nxgraph.pkl')
+    if not force and os.path.exists(cur_path):
+        print(f'load TRG from {cur_path}')
+        with open(cur_path, 'rb') as f:
+            G = pk.load(f)
+    else:
+        G = nx.DiGraph()
+        G.add_node(0)
+        open_lst = [(0,extend_decay)]
+        min_prob = math.pow(extend_decay,max_depth)
+        while len(open_lst) != 0:
+            cur_root,cur_prob = open_lst.pop(0)
+            if random.uniform(0,1) < cur_prob and cur_prob > min_prob:
+                node_lst = list(G.nodes())
+                child_nodes = list(range(len(node_lst),len(node_lst) + random.randint(child_sz[0],child_sz[1])))
+                for child_node in child_nodes:
+                    G.add_node(child_node)
+                    G.add_edge(cur_root,child_node)
+                    open_lst.append((child_node,cur_prob*extend_decay))
+        if not no_save:
+            with open(cur_path,'wb') as f:
+                pk.dump(G,f)
     if is_print:
+        drawG(G)
+        plt.savefig(os.path.join(out_dir, name + '-graph.pdf'))
+        plt.show()
+    return nx.to_undirected(G)
+
+def gen_spiral_graph(circle_expend=10,st_circle_sz=10,conn_sz = 5,name='circle',out_dir='../fig',is_print=True,force=True,no_save=False):
+    cur_path = os.path.join(out_dir, f'SG_cexp_{circle_expend}_csz_{st_circle_sz}_conn_{conn_sz}_nm_{name}.nxgraph.pkl')
+    if not force and os.path.exists(cur_path):
+        print(f'load SG from {cur_path}')
+        with open(cur_path, 'rb') as f:
+            G = pk.load(f)
+    else:
+        G = nx.DiGraph()
+        def _gen_one_line(line_sz,st_id):
+            G = nx.DiGraph()
+            for i in range(st_id, st_id + line_sz):
+                G.add_node(i)
+            node_lst = list(G.nodes())
+            for i in range(st_id, st_id + line_sz-1):
+                G.add_edge(i,i+1)
+            return nx.to_undirected(G)
+
+        circle_ints = []
+        for cid in range(circle_expend):
+            node_lst = list(G.nodes())
+            subG = _gen_one_line(st_circle_sz + circle_expend * cid,st_id=len(node_lst))
+            G = nx.union(G, subG)
+            circle_ints.append((len(node_lst),len(node_lst) + st_circle_sz + circle_expend * cid))
+            # if len(node_lst) > 0:
+            #     cur_node_lst = node_lst.copy()
+            #     random.shuffle(cur_node_lst)
+            #     conn_ids = cur_node_lst[:conn_sz]
+            #     for conn_id in conn_ids:
+            #         G.add_edge(conn_id,random.choice(list(subG.nodes())))
+        node_lst = list(G.nodes())
+        for idx in range(1,len(circle_ints)):
+            n_st,n_ed = circle_ints[idx]
+            c_st,c_ed = circle_ints[idx-1]
+            conn_lst1 = node_lst[c_st:c_ed].copy()
+            conn_lst2 = node_lst[n_st:n_ed].copy()
+            random.shuffle(conn_lst1)
+            random.shuffle(conn_lst2)
+            conn_lst1 = list(sorted(conn_lst1[:conn_sz]))
+            conn_lst2 = list(sorted(conn_lst2[:conn_sz]))
+            for n1,n2 in zip(conn_lst1,conn_lst2):
+                G.add_edge(n1,n2)
+        if not no_save:
+            with open(cur_path,'wb') as f:
+                pk.dump(G,f)
+    if is_print:
+        drawG(G)
+        plt.savefig(os.path.join(out_dir, name + '-graph.pdf'))
+        plt.show()
+    return nx.to_undirected(G)
+
+def gen_net_graph(net_shape=[100,200],edge_prob=0.99,name='net',out_dir='../fig',is_print=True,force=True,no_save=False):
+    cur_path = os.path.join(out_dir, f'NG_shp_{net_shape}_edge_{edge_prob}_nm_{name}.nxgraph.pkl')
+    if not force and os.path.exists(cur_path):
+        print(f'load NG from {cur_path}')
+        with open(cur_path, 'rb') as f:
+            G = pk.load(f)
+    else:
+        G = nx.DiGraph()
+        m = net_shape[0]
+        n = net_shape[1]
+        for i in range(m):
+            for j in range(n):
+                G.add_node(n*i+j)
+        for i in range(m):
+            for j in range(n):
+                if j >= 1 and random.uniform(0,1) < edge_prob:
+                    G.add_edge(i*n + j,i*n+j-1)
+                if i >= 1 and random.uniform(0, 1) < edge_prob:
+                    G.add_edge(i * n + j, (i-1) * n + j)
+        if not no_save:
+            with open(cur_path,'wb') as f:
+                pk.dump(G,f)
+    if is_print:
+        drawG(G)
+        plt.savefig(os.path.join(out_dir, name + '-graph.pdf'))
         plt.show()
     return nx.to_undirected(G)
 
@@ -447,7 +513,7 @@ graph statistics.
 '''
 def anal_G_basic(Gs,names,out_dir='../fig',name=''):
     # assert undirected G.
-    title = ['names','nodes','edges','e/n','avg_deg','max_deg','min_deg']
+    title = ['names','nodes','edges','e/n','avg_deg','max_deg','min_deg','bfs']
     data = []
     for G,name in zip(Gs,names):
         G = nx.to_undirected(G)
@@ -461,14 +527,39 @@ def anal_G_basic(Gs,names,out_dir='../fig',name=''):
             sum_deg += nbs_sz
             max_deg = max(max_deg,nbs_sz)
             min_deg = min(min_deg,nbs_sz)
-        row = [name,ns,es,es/ns,sum_deg/ns,max_deg,min_deg]
+        # anal bfs time.
+        bfss = []
+        for _ in range(100):
+            bfs = time.time()
+            pnt = random.choice(list(G.nodes()))
+            dist_map = {pnt:0}
+            search_lst = [pnt]
+            while len(search_lst) > 0:
+                cur_nid = search_lst.pop(0)
+                for nnid in G.neighbors(cur_nid):
+                    if nnid not in dist_map:
+                        dist_map[nnid] = dist_map[cur_nid] + 1
+                        search_lst.append(nnid)
+            bfs = time.time() - bfs
+            bfss.append(bfs)
+        bfss = sum(bfss) / len(bfss)
+        row = [name,ns,es,es/ns,sum_deg/ns,max_deg,min_deg,bfs]
         data.append(row)
     df = pd.DataFrame(columns=title,data=data)
     df.to_csv(os.path.join(out_dir,name + 'anal-basic.csv'),index=False)
     return df
 
-def anal_G_complex(Gs,names,out_dir='../fig',name='',is_print=True):
+def anal_G_complex(Gs,names,out_dir='../fig',name='',is_print=True,force=True):
     # assert undirected G.
+    cur_path = os.path.join(out_dir,f'G_complex_dm_bc_nm_{name}.anal.pkl')
+    global glb_g2dmat
+    global glb_node2BC
+    if not force and os.path.exists(cur_path):
+        with open(cur_path,'rb') as f:
+            glb_g2dmat = pk.load(f)
+            glb_node2BC = pk.load(f)
+        print('use recovery mechanism on anal complex')
+        return None
     title = ['names', 'diameter','eccentricity','avg_BC','max_BC','min_BC']
     data = []
     for G, name in zip(Gs, names):
@@ -506,7 +597,7 @@ def anal_G_complex(Gs,names,out_dir='../fig',name='',is_print=True):
             if idx % 10 == 0:
                 print('complex finish {}'.format(idx))
 
-        global glb_g2dmat
+        # global glb_g2dmat
         glb_g2dmat[name] = dist_mat
 
         max_BC = -1
@@ -519,7 +610,7 @@ def anal_G_complex(Gs,names,out_dir='../fig',name='',is_print=True):
             max_BC = max(max_BC,node2BC[i])
             min_BC = min(min_BC,node2BC[i])
 
-        global glb_node2BC
+        # global glb_node2BC
         glb_node2BC[name] = node2BC
 
         if is_connected:
@@ -546,6 +637,126 @@ def anal_G_complex(Gs,names,out_dir='../fig',name='',is_print=True):
         plt.savefig(os.path.join(out_dir,name+'-BCDist.pdf'))
         if is_print:
             plt.show()
+    with open(cur_path,'wb') as f:
+        pk.dump(glb_g2dmat,f)
+        pk.dump(glb_node2BC,f)
+    df = pd.DataFrame(columns=title, data=data)
+    df.to_csv(os.path.join(out_dir,name + 'anal-complex.csv'),index=False)
+    return df
+
+
+def _anal_G_complex(pairs,G,**kwargs):
+    sp_cnt = 0
+    node2BC = {}
+    diameter = 0
+    dist_triples = []
+    is_connected = True
+    for i,j in pairs:
+        try:
+            for path in nx.all_shortest_paths(G, source=i, target=j):
+                sp_cnt += 1
+                for nid in path:
+                    if nid in node2BC:
+                        node2BC[nid] += 1
+                    else:
+                        node2BC[nid] = 1
+                path_len = len(path) - 1
+                diameter = max(diameter, path_len)
+                dist_triples.append((i,j,path_len))
+        except nx.exception.NetworkXNoPath:
+            print('{} and {} occupy no path!'.format(i, j))
+            is_connected = False
+            continue
+    return sp_cnt,node2BC,diameter,dist_triples,is_connected
+
+def anal_G_complex_p(Gs,names,out_dir='../fig',name='',is_print=True,force=True,num_workers=12):
+    # assert undirected G.
+    global glb_g2dmat
+    global glb_node2BC
+    cur_path = os.path.join(out_dir,f'G_complex_dm_bc_nm_{name}.anal.pkl')
+    if not force and os.path.exists(cur_path):
+        with open(cur_path,'rb') as f:
+            glb_g2dmat = pk.load(f)
+            glb_node2BC = pk.load(f)
+        print('use recovery mechanism on anal complex')
+        return None
+    title = ['names', 'diameter','eccentricity','avg_BC','max_BC','min_BC']
+    data = []
+    mpm = MPManager(batch_sz=500, num_workers=num_workers, use_shuffle=False)
+    for G, name in zip(Gs, names):
+        print(f'start to proc Graph {name}')
+        G = nx.to_undirected(G)
+        nodes = list(G.nodes())
+        node2BC = {}
+        sp_cnt = 0
+        ecc = len(nodes)
+        diameter = 0
+        is_connected = True
+        dist_mat = tc.zeros(size=(len(nodes),len(nodes)),dtype=tc.int16)
+        pairs = []
+        for idx,i in enumerate(nodes):
+            if idx == len(nodes):
+                break
+            for j in nodes[idx + 1:]:
+                if j == i:
+                    continue
+                pairs.append((i,j))
+        random.shuffle(pairs)
+        ret_dict = mpm.multi_proc(func=_anal_G_complex,seq_args=[pairs],auto_concat=False,G=G)
+        for idx,(e_sp_cnt,e_node2BC,e_diameter,e_dist_triples,e_is_connected) in tqdm.tqdm(ret_dict.items()):
+            sp_cnt += e_sp_cnt
+            for nid in e_node2BC:
+                node2BC[nid] = node2BC.get(nid,0) + e_node2BC[nid]
+            diameter = max(diameter,e_diameter)
+            for ei,ej,dist in e_dist_triples:
+                dist_mat[ei,ej] = dist
+                dist_mat[ej,ei] = dist
+            if not e_is_connected:
+                is_connected = e_is_connected
+
+        # global glb_g2dmat
+        glb_g2dmat[name] = dist_mat
+
+        max_BC = -1
+        min_BC = sp_cnt + 1
+        sum_BC = 0.
+
+        for i in node2BC:
+            node2BC[i] /= sp_cnt
+            sum_BC += node2BC[i]
+            max_BC = max(max_BC,node2BC[i])
+            min_BC = min(min_BC,node2BC[i])
+
+        # global glb_node2BC
+        glb_node2BC[name] = node2BC
+
+        if is_connected:
+            for idx,i in enumerate(nodes):
+                if i == len(nodes) - 1:
+                    break
+                ecc_at_j = 0
+                for j in nodes[idx + 1:]:
+                    ecc_at_j = max(ecc_at_j,dist_mat[i,j].item())
+                ecc = min(ecc,ecc_at_j)
+        else:
+            ecc = -1
+            diameter = -1
+        row = [name,diameter,ecc,sum_BC / len(nodes),max_BC,min_BC]
+        data.append(row)
+
+        # draw BC distribution.
+        xs = nodes
+        ys = [node2BC[nid] for nid in nodes]
+        plt.bar(x=xs,height=ys,width=0.05)
+        plt.title(name)
+        plt.ylabel('BC value of nodes')
+        plt.xlabel('nodes')
+        plt.savefig(os.path.join(out_dir,name+'-BCDist.pdf'))
+        if is_print:
+            plt.show()
+    with open(cur_path,'wb') as f:
+        pk.dump(glb_g2dmat,f)
+        pk.dump(glb_node2BC,f)
     df = pd.DataFrame(columns=title, data=data)
     df.to_csv(os.path.join(out_dir,name + 'anal-complex.csv'),index=False)
     return df
@@ -941,8 +1152,8 @@ def anal_walks_basic(Gs,G_names,walk_len=5,test_src_sz=10,test_batch_sz=30,walk_
             plt.scatter(x=xs,y=ys,c='dodgerblue',marker=None,alpha=0.01)
             # plt.title(name)
             plt.ylim(0,walk_len)
-            plt.xlabel('Walk length')
-            plt.ylabel('Probability of Explored Distance')
+            plt.xlabel('Walk Length',fontsize=15)
+            plt.ylabel('Exploration Range of Distance',fontsize=15)
             plt.savefig(os.path.join(out_dir,G_name+'-'+name+'-walk.pdf'))
             if is_print:
                 plt.show()
@@ -963,6 +1174,14 @@ def embed_node2vec(G,G_name,emb_sz,walk_len,walks_per_node,window_sz=None,neg_sz
     walks = []
     for node in G.nodes():
         walks.extend(walk_node2vec(root=node,G=G,G_name=G_name,length=walk_len,batch_sz=walks_per_node))
+    walks = walk2str(walks)
+    emb = walk2embed(walks,emb_sz=emb_sz,window_sz=window_sz,neg_sz=neg_sz,name=G_name+'-gen')
+    return emb
+
+def embed_bfs(G,G_name,emb_sz,walk_len,walks_per_node,window_sz=None,neg_sz=5):
+    walks = []
+    for node in G.nodes():
+        walks.extend(walk_node2vec(root=node,G=G,G_name=G_name,length=walk_len,batch_sz=walks_per_node,p=10,q=0.1))
     walks = walk2str(walks)
     emb = walk2embed(walks,emb_sz=emb_sz,window_sz=window_sz,neg_sz=neg_sz,name=G_name+'-gen')
     return emb
@@ -996,8 +1215,8 @@ def embed_bcdr(G,G_name,emb_sz,input_len,output_len,walks_per_node,window_sz=Non
             sample_prob.append(node2BC[node] * math.pow(alpha,int(dist_mat[root][node])))
         sum_sample_prob = sum(sample_prob)
         sample_prob = [ele / sum_sample_prob for ele in sample_prob]
-        samples = np.random.choice(a=sample_node_lst,size=(len(cur_walks)*output_exps,output_len),p=sample_prob)
-        roots = np.array([root]*len(cur_walks)*output_exps)
+        samples = np.random.choice(a=sample_node_lst,size=(int(len(cur_walks)*output_exps),output_len),p=sample_prob)
+        roots = np.array([root]*int(len(cur_walks)*output_exps))
         new_walks = np.concatenate([roots.reshape(-1,1),samples],axis=1)
         walks.extend(new_walks.tolist())
         # walks.extend(cur_walks)
@@ -1030,9 +1249,12 @@ def anal_embed(Gs,G_names,emb_sz,walk_len=40,walks_per_node=20,test_src_sz=20,te
             if walk_type == 'surf':
                 emb = embed_surf(G=G, G_name=G_name, emb_sz=emb_sz, walk_len=walk_len, walks_per_node=walks_per_node)
                 emb_dict[walk_type] = emb
+            if walk_type == 'bfs':
+                emb = embed_bfs(G=G, G_name=G_name, emb_sz=emb_sz, walk_len=walk_len,walks_per_node=walks_per_node)
+                emb_dict[walk_type] = emb
             if walk_type == 'bcdr':
-                exps_coef = 5
-                emb = embed_bcdr(G=G, G_name=G_name, emb_sz=emb_sz, input_len=walk_len,output_len=walk_len*exps_coef, walks_per_node=walks_per_node,input_exps=1,output_exps=exps_coef)
+                exps_coef = 0.5
+                emb = embed_bcdr(G=G, G_name=G_name, emb_sz=emb_sz, input_len=walk_len,output_len=int(walk_len*exps_coef), walks_per_node=walks_per_node,input_exps=1,output_exps=exps_coef)
                 emb_dict[walk_type] = emb
         glb_embed[G_name] = emb_dict
         # generate test nodes.
@@ -1043,7 +1265,7 @@ def anal_embed(Gs,G_names,emb_sz,walk_len=40,walks_per_node=20,test_src_sz=20,te
         for name in emb_dict:
             cur_embs = emb_dict[name]
             score = []
-            for i in range(100): # max for graph diameter.
+            for i in range(101): # max for graph diameter.
                 score.append([])
             for src in srcs:
                 src_emb = cur_embs[src]
@@ -1068,9 +1290,9 @@ def anal_embed(Gs,G_names,emb_sz,walk_len=40,walks_per_node=20,test_src_sz=20,te
                     xs.append(idx)
                     ys.append(score)
             plt.scatter(x=xs,y=ys,c='dodgerblue',alpha=0.05)
-            plt.ylim(0,15)
-            plt.xlabel('shortest distance between nodes on the graph')
-            plt.ylabel('distance measured on the embedding space')
+            plt.ylim(0,10)
+            plt.xlabel('SP Distance on the graph',fontsize=15)
+            plt.ylabel('Distance in the embedding space',fontsize=15)
             # plt.title(name)
             plt.savefig(os.path.join(out_dir,G_name+'-'+name+'-embed.pdf'))
             if is_print:
@@ -1089,7 +1311,7 @@ def anal_embed_rate(Gs,G_names,test_src_sz=20,test_batch_sz=100,out_dir='../fig'
         for name in embed_dict:
             node_lst = list(G.nodes())
             test_src_sz = min(test_src_sz,len(node_lst))
-            test_batch_sz = min(test_src_sz,len(node_lst))
+            test_batch_sz = min(test_batch_sz,len(node_lst))
 
             random.shuffle(node_lst)
             srcs = node_lst[:test_src_sz]
@@ -1122,10 +1344,10 @@ def anal_embed_rate(Gs,G_names,test_src_sz=20,test_batch_sz=100,out_dir='../fig'
 
             plt.scatter(x=range(len(lgs)),y=lgs,c=cs)
 
-            plt.legend(loc='upper right')
+            plt.legend(loc='upper right',fontsize=15)
             # plt.title(name)
-            plt.ylabel('value of distance expression')
-            plt.xlabel('sampled node triples')
+            plt.ylabel('value of distance expression',fontsize=15)
+            plt.xlabel('sampled node triples',fontsize=15)
             plt.savefig(os.path.join(out_dir, G_name + '-' + name + '-ineq.pdf'))
             if is_print:
                 plt.show()
@@ -1151,8 +1373,8 @@ def drawG(G,c='dodgerblue',is_undirected=True):
 
 def walk2embed(walks,emb_sz=16,window_sz=None,neg_sz=5,out_dir='../tmp',name=''):
     if window_sz is None:
-        window_sz = len(walks[0]) // 4
-    model = m_deepwalk.Word2Vec(walks, size=emb_sz, window=window_sz, min_count=0, sg=1, hs=0,negative=neg_sz,workers=8)
+        window_sz = max(4,len(walks[0]) // 4)
+    model = m_deepwalk.Word2Vec(walks, vector_size=emb_sz, window=window_sz, min_count=0, sg=1, hs=0,negative=neg_sz,workers=12)
     model.wv.save_word2vec_format(os.path.join(out_dir, 'test-' + name + '.embed'))
 
     emb = None
@@ -1618,6 +1840,98 @@ def rt_circle_path_visual():
     print(df)
     circle_path_test(G,root_sz=3,length=10,batch_sz=3,walk_types=['gen','n2v','surf','bfs','bc'],name=G_name,is_print=True)
 
+def rt_visual_stat():
+    force=False
+    CG = gen_circle_graph(circle_num=20,circle_sz=[5,20], conn_sz=1, name='CG',force=force)
+    TG = gen_triangle_graph(triangle_sz=[3,6],conn_sz=1,traingle_num=100,name='TG',force=force)
+    TCG = gen_tricircle_graph(circle_num=10,triangle_sz=[3,6],conn_sz=1,traingle_num=7,name='TCG',force=force)
+    TRG = gen_tree_graph(child_sz=[1,5],extend_decay=0.9,max_depth=7,name='TRG',force=force)
+    SG = gen_spiral_graph(circle_expend=10,st_circle_sz=10,conn_sz=5,name='SG',force=force)
+    NG = gen_net_graph(net_shape=[20,10],edge_prob=0.99,name='NG',force=force)
+    anal_G_basic(Gs=[CG, TG, TCG, TRG, SG, NG], names=['CG', 'TG', 'TCG', 'TRG', 'SG', 'NG'])
+    anal_G_complex_p(Gs=[CG, TG, TCG, TRG, SG, NG], names=['CG', 'TG', 'TCG', 'TRG', 'SG', 'NG'])
+
+def rt_visual_bc_walk():
+    force = False
+    CG = gen_circle_graph(circle_num=20, circle_sz=[5, 20], conn_sz=1, name='CG', force=force)
+    TG = gen_triangle_graph(triangle_sz=[3, 6], conn_sz=1, traingle_num=100, name='TG', force=force)
+    TCG = gen_tricircle_graph(circle_num=10, triangle_sz=[3, 6], conn_sz=1, traingle_num=7, name='TCG', force=force)
+    TRG = gen_tree_graph(child_sz=[1, 5], extend_decay=0.9, max_depth=7, name='TRG', force=force)
+    SG = gen_spiral_graph(circle_expend=10, st_circle_sz=10, conn_sz=5, name='SG', force=force)
+    NG = gen_net_graph(net_shape=[20, 10], edge_prob=0.99, name='NG', force=force)
+    anal_G_basic(Gs=[CG,TG,TCG,TRG,SG,NG],names=['CG','TG','TCG','TRG','SG','NG'])
+    anal_G_complex_p(Gs=[CG,TG,TCG,TRG,SG,NG],names=['CG','TG','TCG','TRG','SG','NG'],force=False)
+
+    # anal_walks_basic([CG],G_names=['CG'],walk_len=30,test_src_sz=20,test_batch_sz=10,walk_types=['gen','n2v','surf','bfs','bc'])
+    # anal_walks_basic([TG],G_names=['TG'],walk_len=80,test_src_sz=20,test_batch_sz=10,walk_types=['gen','n2v','surf','bfs','bc'])
+    # anal_walks_basic([TCG],G_names=['TCG'],walk_len=20,test_src_sz=20,test_batch_sz=10,walk_types=['gen','n2v','surf','bfs','bc'])
+    # anal_walks_basic([TRG],G_names=['TRG'],walk_len=8,test_src_sz=20,test_batch_sz=10,walk_types=['gen','n2v','surf','bfs','bc'])
+    # anal_walks_basic([SG],G_names=['SG'],walk_len=60,test_src_sz=20,test_batch_sz=10,walk_types=['gen','n2v','surf','bfs','bc'])
+    # anal_walks_basic([NG],G_names=['NG'],walk_len=20,test_src_sz=20,test_batch_sz=10,walk_types=['gen','n2v','surf','bfs','bc'])
+
+def rt_visual_dist():
+    force = False
+    CG = gen_circle_graph(circle_num=20, circle_sz=[5, 20], conn_sz=1, name='CG', force=force)
+    TG = gen_triangle_graph(triangle_sz=[3, 6], conn_sz=1, traingle_num=100, name='TG', force=force)
+    TCG = gen_tricircle_graph(circle_num=10, triangle_sz=[3, 6], conn_sz=1, traingle_num=7, name='TCG', force=force)
+    TRG = gen_tree_graph(child_sz=[1, 5], extend_decay=0.9, max_depth=7, name='TRG', force=force)
+    SG = gen_spiral_graph(circle_expend=10, st_circle_sz=10, conn_sz=5, name='SG', force=force)
+    NG = gen_net_graph(net_shape=[20, 10], edge_prob=0.99, name='NG', force=force)
+    anal_G_basic(Gs=[CG, TG, TCG, TRG, SG, NG], names=['CG', 'TG', 'TCG', 'TRG', 'SG', 'NG'])
+    anal_G_complex_p(Gs=[CG, TG, TCG, TRG, SG, NG], names=['CG', 'TG', 'TCG', 'TRG', 'SG', 'NG'], force=False)
+
+    # anal_embed(Gs=[CG],G_names=['CG'],emb_sz=16,walk_len=30,walks_per_node=20,test_src_sz=20,test_batch_sz=100,walk_types=['gen','n2v','surf','bfs','bcdr'])
+    # anal_embed(Gs=[TG],G_names=['TG'],emb_sz=16,walk_len=80,walks_per_node=20,test_src_sz=20,test_batch_sz=100,walk_types=['gen','n2v','surf','bfs','bcdr'])
+    # anal_embed(Gs=[TCG],G_names=['TCG'],emb_sz=16,walk_len=20,walks_per_node=20,test_src_sz=20,test_batch_sz=100,walk_types=['gen','n2v','surf','bfs','bcdr'])
+    # anal_embed(Gs=[TRG],G_names=['TRG'],emb_sz=16,walk_len=8,walks_per_node=20,test_src_sz=20,test_batch_sz=100,walk_types=['gen','n2v','surf','bfs','bcdr'])
+    # anal_embed(Gs=[SG],G_names=['SG'],emb_sz=16,walk_len=60,walks_per_node=20,test_src_sz=20,test_batch_sz=100,walk_types=['gen','n2v','surf','bfs','bcdr'])
+    # anal_embed(Gs=[NG],G_names=['NG'],emb_sz=16,walk_len=20,walks_per_node=20,test_src_sz=20,test_batch_sz=100,walk_types=['gen','n2v','surf','bfs','bcdr'])
+
+
+def rt_visual_dist():
+    force = False
+    CG = gen_circle_graph(circle_num=20, circle_sz=[5, 20], conn_sz=1, name='CG', force=force)
+    TG = gen_triangle_graph(triangle_sz=[3, 6], conn_sz=1, traingle_num=100, name='TG', force=force)
+    TCG = gen_tricircle_graph(circle_num=10, triangle_sz=[3, 6], conn_sz=1, traingle_num=7, name='TCG', force=force)
+    TRG = gen_tree_graph(child_sz=[1, 5], extend_decay=0.9, max_depth=7, name='TRG', force=force)
+    SG = gen_spiral_graph(circle_expend=10, st_circle_sz=10, conn_sz=5, name='SG', force=force)
+    NG = gen_net_graph(net_shape=[20, 10], edge_prob=0.99, name='NG', force=force)
+    anal_G_basic(Gs=[CG, TG, TCG, TRG, SG, NG], names=['CG', 'TG', 'TCG', 'TRG', 'SG', 'NG'])
+    anal_G_complex_p(Gs=[CG, TG, TCG, TRG, SG, NG], names=['CG', 'TG', 'TCG', 'TRG', 'SG', 'NG'], force=False)
+
+    # anal_embed(Gs=[CG],G_names=['CG'],emb_sz=16,walk_len=30,walks_per_node=20,test_src_sz=20,test_batch_sz=100,walk_types=['gen','n2v','surf','bfs','bcdr'])
+    # anal_embed_rate(Gs=[CG],G_names=['CG'],test_src_sz=100,test_batch_sz=100)
+    #
+    # anal_embed(Gs=[TG],G_names=['TG'],emb_sz=16,walk_len=80,walks_per_node=20,test_src_sz=20,test_batch_sz=100,walk_types=['gen','n2v','surf','bfs','bcdr'])
+    # anal_embed_rate(Gs=[TG],G_names=['TG'],test_src_sz=100,test_batch_sz=100)
+
+    # anal_embed(Gs=[TCG],G_names=['TCG'],emb_sz=16,walk_len=20,walks_per_node=20,test_src_sz=20,test_batch_sz=100,walk_types=['gen','n2v','surf','bfs','bcdr'])
+    # anal_embed_rate(Gs=[TCG],G_names=['TCG'],test_src_sz=100,test_batch_sz=100)
+
+    # anal_embed(Gs=[TRG],G_names=['TRG'],emb_sz=16,walk_len=8,walks_per_node=20,test_src_sz=20,test_batch_sz=100,walk_types=['gen','n2v','surf','bfs','bcdr'])
+    # anal_embed_rate(Gs=[TRG],G_names=['TRG'],test_src_sz=100,test_batch_sz=100)
+    #
+    # anal_embed(Gs=[SG],G_names=['SG'],emb_sz=16,walk_len=60,walks_per_node=20,test_src_sz=20,test_batch_sz=100,walk_types=['gen','n2v','surf','bfs','bcdr'])
+    # anal_embed_rate(Gs=[SG],G_names=['SG'],test_src_sz=100,test_batch_sz=100)
+    #
+    anal_embed(Gs=[NG],G_names=['NG'],emb_sz=16,walk_len=20,walks_per_node=20,test_src_sz=20,test_batch_sz=100,walk_types=['gen','n2v','surf','bfs','bcdr'])
+    anal_embed_rate(Gs=[NG],G_names=['NG'],test_src_sz=100,test_batch_sz=100)
+
+
+def rt_dump_edgelist():
+    force = False
+    CG = gen_circle_graph(circle_num=20, circle_sz=[5, 20], conn_sz=1, name='CG', force=force)
+    TG = gen_triangle_graph(triangle_sz=[3, 6], conn_sz=1, traingle_num=100, name='TG', force=force)
+    TCG = gen_tricircle_graph(circle_num=10, triangle_sz=[3, 6], conn_sz=1, traingle_num=7, name='TCG', force=force)
+    TRG = gen_tree_graph(child_sz=[1, 5], extend_decay=0.9, max_depth=7, name='TRG', force=force)
+    SG = gen_spiral_graph(circle_expend=10, st_circle_sz=10, conn_sz=5, name='SG', force=force)
+    NG = gen_net_graph(net_shape=[20, 10], edge_prob=0.99, name='NG', force=force)
+
+    for G,G_name in zip([CG, TG, TCG, TRG, SG, NG],['CG', 'TG', 'TCG', 'TRG', 'SG', 'NG']):
+        with open(f'../datasets/other/{G_name}.txt','w') as f:
+            for edge in G.edges():
+                f.write(f'{edge[0]}\t{edge[1]}\n')
+
 '''
 parallel routine.
 '''
@@ -1625,31 +1939,19 @@ def prt_acc_embed_rate(test_sz=20,workers=8):
     pass
 
 if __name__ == '__main__':
-
     # G1 = gen_comm_graph(cls_sz=20, conn_sz=1, regular=3, node_sz=10, name='Graph1')
     # G2 = gen_comm_graph(cls_sz=20, conn_sz=1, regular=3, node_sz=10, name='Graph2')
     # G3 = gen_comm_graph(cls_sz=20, conn_sz=1, regular=3, node_sz=10, name='Graph3')
-
-    # G_cir1 = gen_circle_graph(circle_num=20,circle_sz=[5,20], conn_sz=1, name='G_cir1')
-    # G_tri1 = gen_triangle_graph(triangle_sz=[3,6],conn_sz=1,traingle_num=100,name='G_tri')
-    # G_tc1 = gen_tricircle_graph(circle_num=10,triangle_sz=[3,6],conn_sz=1,traingle_num=7,name='G_tc1')
-    # G_tree1 = gen_tree_graph(child_sz=[1,5],extend_decay=0.9,max_depth=7,name='G_tree1')
-    # G_sp1 = gen_spiral_graph(circle_expend=10,st_circle_sz=10,conn_sz=5,name='G_sp1')
-    # G_net1 = gen_net_graph(net_shape=[20,10],edge_prob=0.99,name='G_net1')
-
     # rt_general()
     # rt_acc_embed_rate(test_sz=10)
     # rt_real_graph_anal()
     # rt_proc_graph_multiconn()
-
     # rt_super_walk_test()
     # rt_circle_walk_test_independent()
     # rt_circle_walk_test_cross()
     # rt_circle_walk_test_inner()
     # rt_circle_walk_test_disk()
-    #
     # rt_circle_path_visual()
-
     # crate = 0.9
     # G_cir, cir_cnt = gen_disk_like_graph(circle_num=max(1, int(crate * 250)), node_sz=250, is_print=True,
     #                                      is_cir_cnt=True)
@@ -1665,4 +1967,9 @@ if __name__ == '__main__':
     # rt_real_graph_anal()
     # G,_ = dgl.load_graphs('../datasets/dst/DBLP')
     # G = G[0]
-    anal_BC_fast(G_file='../datasets/dst/DBLP',name='DBLP-bc',num_worker=8)
+    # anal_BC_fast(G_file='../datasets/dst/DBLP',name='DBLP-bc',num_worker=8)
+
+    # rt_visual_stat()
+    # rt_visual_bc_walk()
+    # rt_visual_dist()
+    rt_dump_edgelist()
