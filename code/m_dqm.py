@@ -1470,6 +1470,331 @@ class DADL(DistanceQueryModel):
         self.embs = tc.from_numpy(np.load(load_dict['embs_path']))
         self.model = tc.load(load_dict['model_path'],map_location=device)
 
+
+class DistDecoder_DADL(nn.Module):
+    def __init__(self, emb_sz=16):
+        super(DistDecoder_DADL, self).__init__()
+        self.emb_sz = emb_sz
+        self.lin1 = nn.Linear(emb_sz * 2, emb_sz)
+        self.lin2 = nn.Linear(emb_sz, 1)
+
+    def forward(self, src, dst):
+        out = self.lin1(tc.cat((src, dst), dim=1))
+        out = F.relu(out)
+        out = self.lin2(out)
+        out = F.softplus(out)
+        return out
+
+class HALK(DistanceQueryModel):
+    def __init__(self,emb_sz=16,landmark_sz=100,lr=0.01,iters=15,p=1,q=1,l=80,k=5,num_walks=10,num_workers=8,batch_landmark_sz=5,batch_node_sz=100,init_fraction=10,batch_walk_sz=100,**kwargs):
+        '''
+        :param emb_sz: model embedding size
+        :param landmark_sz: landmark size for training node pair
+        :param lr: learning rate in NN.
+        :param iters: total iterations in NN.
+        :param p: control parameter in node2vec random walk
+        :param q: control parameter in node2vec random walk
+        :param l: length of random walk
+        :param k: negative sampling size in skip-gram.
+        :param num_walks: number of walks in skip-gram.
+        :param kwargs:
+        '''
+        super(HALK, self).__init__(**kwargs)
+        self.emb_sz = emb_sz
+        self.landmark_sz = landmark_sz
+        self.lr = lr
+        self.iters = iters
+        self.p = p
+        self.q = q
+        self.l = l
+        self.k = k
+        self.num_walks = num_walks
+        self.num_workers=num_workers
+        self.batch_landmark_sz = batch_landmark_sz
+        self.batch_node_sz = batch_node_sz
+        self.init_fraction = init_fraction
+        self.batch_walk_sz = batch_walk_sz
+
+        self.storage_lst = [self.pwd() + '.pkl']
+
+    def __str__(self):
+        return 'HALK:' + self.model_name
+
+    @staticmethod
+    def _s_gen_train_pair(landmarks,nx_g,**kwargs):
+        # nx_g = nx.Graph()
+        pid = kwargs['__PID__']
+        train_pairs = []
+        for landmark in landmarks:
+            search_lst = [landmark]
+            dist_map = {landmark:0}
+            while len(search_lst) != 0:
+                cur_nid = search_lst.pop(0)
+                for nnid in nx_g.neighbors(cur_nid):
+                    if nnid not in dist_map:
+                        dist_map[nnid] = dist_map[cur_nid] + 1
+                        search_lst.append(nnid)
+            for nid in dist_map:
+                if dist_map[nid] >= 1:
+                    train_pairs.append([landmark,nid,dist_map[nid]])
+        return train_pairs
+
+    @staticmethod
+    def _s_gen_walks(roots,nx_g,l,num_walks,**kwargs):
+        walks = []
+        for root in roots:
+            for _ in range(num_walks):
+                cur_l = 0
+                cur_walk = [str(root)]
+                search_map = {root}
+                cur_nid = root
+                while len(cur_walk) < l:
+                    is_added = False
+                    for nid in nx_g.neighbors(cur_nid):
+                        if nid not in search_map:
+                            search_map.add(nid)
+                            cur_walk.append(str(nid))
+                            is_added = True
+                            break
+                    if not is_added:
+                        break
+                walks.append(cur_walk)
+        return walks
+
+    def _generate(self):
+        # self.nx_g = nx.DiGraph()
+        # gen train pairs.
+        mpm = utils.MPManager(batch_sz=self.batch_landmark_sz, num_workers=self.num_workers, use_shuffle=False)
+        nodes = list(self.nx_g.nodes())
+        random.shuffle(nodes)
+        landmarks = nodes[:self.landmark_sz]
+        train_pairs = mpm.multi_proc(HALK._s_gen_train_pair,[landmarks],nx_g=self.nx_g,auto_concat=True)
+        train_pairs = tc.FloatTensor(train_pairs)
+        # train embs with Node2Vec.
+
+
+        # perform walk.
+        print(f'start to perform walk at num {self.num_walks} for each node...')
+        st_time = time.time()
+        mpm = utils.MPManager(batch_sz=self.batch_node_sz, num_workers=self.num_workers, use_shuffle=False)
+        random.shuffle(nodes)
+        walks = mpm.multi_proc(HALK._s_gen_walks, [nodes], nx_g=self.nx_g,l=self.l,num_walks=self.num_walks, auto_concat=True)
+        print(f'end perform walk with time {time.time()-st_time}')
+
+        # cal freq.
+        print(f'start to cal frequency.')
+        st_time = time.time()
+        n2freq = {nid:0 for nid in range(self.nx_g.number_of_nodes())}
+        for walk in walks:
+            for nid in walk:
+                n2freq[int(nid)] += 1
+        walks = list(sorted(walks,key=lambda w: - n2freq[int(w[0])]))
+        print(f'end cal frequency with time {time.time() - st_time}')
+
+        # train emb.
+        print('{} start to train embeddings with HALK...'.format(self))
+        st_time = time.time()
+        init_sz = int(len(walks)*self.init_fraction)
+        w2v = gs.models.Word2Vec(sentences=walks[:init_sz], vector_size=self.emb_sz, window=3, min_count=0, workers=self.num_workers, sg=1, epochs=5)
+        pnt = init_sz
+        while pnt < len(walks):
+            cur_walks = walks[pnt:min(pnt,len(walks))]
+            pnt += self.batch_walk_sz
+            w2v.build_vocab(cur_walks, keep_raw_vocab=True, trim_rule=None, progress_per=10000, update=True)
+            w2v.train(cur_walks, epochs=5, total_examples=len(cur_walks))
+        embs = np.zeros(shape=(self.nx_g.number_of_nodes(),self.emb_sz))
+        for word in w2v.wv.key_to_index.keys():
+            embs[int(word),:] = np.array(w2v.wv[word])
+        self.embs = tc.as_tensor(tc.from_numpy(embs),dtype=tc.float32)
+        print('{} train embeddings finished with time {:.4f}s'.format(self,time.time()-st_time))
+
+        # train NN.
+        print('{} start to train NN Distance Decoder...'.format(self))
+        st_time = time.time()
+        self.model = DistDecoder_DADL(emb_sz=self.emb_sz)
+        loss = nn.MSELoss(reduction='sum')
+        optim = tc.optim.Adam(self.model.parameters(), lr=self.lr)
+        self.model.to(device)
+        pair_idx = list(range(len(train_pairs)))
+        self.model.train()
+        for e_iter in range(self.iters):
+            random.shuffle(pair_idx)
+            train_pairs = train_pairs[pair_idx]
+            train_batch_sz = 128
+            pnt = 0
+            train_loss = 0.
+            cur_len = 0
+            while pnt < len(train_pairs):
+                optim.zero_grad()
+                batch_idx = pnt,min(pnt + train_batch_sz,len(train_pairs))
+                pnt += batch_idx[1] - batch_idx[0]
+                batch_in = train_pairs[batch_idx[0]:batch_idx[1]]
+                srcs = batch_in[:,0].long()
+                dsts = batch_in[:,1].long()
+                dists = batch_in[:,2].float()
+                emb_srcs = self.embs[srcs]
+                emb_dsts = self.embs[dsts]
+                dists = dists.to(device)
+                emb_srcs = emb_srcs.to(device)
+                emb_dsts = emb_dsts.to(device)
+                pred_dists = self.model(emb_srcs,emb_dsts)
+                batch_loss = loss(pred_dists,dists.view(-1,1))
+                batch_loss.backward()
+                optim.step()
+                train_loss += batch_loss.item()
+                print('\titer {} | batch {}/{} | loss:{:.5f}'.format(e_iter,pnt,len(train_pairs),train_loss / pnt))
+            print('iter {} finished | loss:{:.5f}'.format(e_iter,train_loss / pnt))
+        print('{} train NN Distance Decoder finished with time {:.4f}s'.format(self,time.time() - st_time))
+        self._save_param_pickle()
+
+        ed_time = time.time()
+
+        # anal mem.
+        self.train_var_lst.append(self.embs)
+        self.train_var_lst.append(list(self.nx_g.edges()))
+        self.train_var_lst.append(train_pairs)
+        self.train_var_lst.append(landmarks)
+        for p in self.model.parameters():
+            self.train_var_lst.append(p) # inner torch parameters.
+
+        return ed_time
+
+    def _load(self):
+        if not os.path.exists(self.pwd()+'.pkl'):
+            return False
+        self._load_param_pickle()
+        return True
+
+    def _query(self,srcs,dsts):
+        emb_srcs = self.embs[srcs].to(device)
+        emb_dsts = self.embs[dsts].to(device)
+        dists = self.model(emb_srcs, emb_dsts)
+        for idx in range(srcs.shape[0]):
+            if int(srcs[idx]) == int(dsts[idx]):
+                dists[idx] = 0.
+            elif int(dsts[idx]) in set(self.nx_g.neighbors(int(srcs[idx]))):
+                dists[idx] = 1.
+        ed_time = time.time()
+
+        self.query_var_lst = []
+        self.query_var_lst.append(self.embs)
+        for p in self.model.parameters():
+            self.query_var_lst.append(p) # inner torch parameters.
+        self.query_var_lst.append(list(self.nx_g.edges()))
+
+        return dists.view(-1),ed_time
+
+    def _save_param(self):
+        save_dict = {'embs_path': self.pwd() + '.embs.npy','model_path':self.pwd()+'.model'}
+        with open(self.pwd() + '.json', 'w') as f:
+            json.dump(save_dict, f)
+        np.save(self.pwd() + '.embs.npy', self.embs.numpy())
+        tc.save(self.model,self.pwd()+'.model')
+
+    def _save_param_pickle(self):
+        with open(self.pwd() + '.pkl', 'wb') as f:
+            pk.dump(self.embs, f)
+            pk.dump(self.model, f)
+
+    def _load_param_pickle(self):
+        with open(self.pwd() + '.pkl', 'rb') as f:
+            self.embs = pk.load(f)
+            self.model = pk.load(f)
+
+    def _load_param(self):
+        with open(self.pwd() + '.json', 'r') as f:
+            load_dict = json.load(f)
+        assert load_dict is not None, print('cur path:{}'.format(self.pwd()))
+        self.embs = tc.from_numpy(np.load(load_dict['embs_path']))
+        self.model = tc.load(load_dict['model_path'],map_location=device)
+
+
+
+
+class DistDecoder_Vdist2Vec(nn.Module):
+    def __init__(self, num_nodes,emb_sz,num_hiddens):
+        super(DistDecoder_Vdist2Vec, self).__init__()
+        self.num_nodes = num_nodes
+        self.emb_sz = emb_sz
+        self.num_hiddens = num_hiddens
+        self.emb = nn.Embedding(self.num_nodes,self.emb_sz)
+
+        self.lin1 = nn.Linear(emb_sz * 2, num_hiddens[0])
+        self.lin2 = nn.Linear(num_hiddens[0], num_hiddens[1])
+
+    def forward(self, nids):
+        emb = self.emb(nids)  # [2 × emb_sz]
+        out = self.lin1()
+        out = F.relu(out)
+        out = self.lin2(out)
+        out = F.softplus(out)
+        return out
+
+class DiffDecoder_Vdist2Vec(nn.Module):
+    def __init__(self,emb_sz,num_hiddens):
+        super(DiffDecoder_Vdist2Vec, self).__init__()
+        self.emb_sz=emb_sz
+        self.num_hiddens = num_hiddens
+
+class Vdist2Vec(DistanceQueryModel):
+    def __init__(self,num_nodes,landmark_sz=16,emb_ratio=0.05,num_hiddens=[20,100],**kwargs):
+        super(Vdist2Vec, self).__init__(**kwargs)
+        self.num_nodes = num_nodes
+        self.emb_ratio = emb_ratio
+        self.emb_sz = int(math.ceil(self.num_nodes * emb_ratio)) # use ceiling for emb dim.
+        assert len(num_hiddens) == 2, print(f'require two hidden layers but got {len(num_hiddens)} layers')
+        self.num_hiddens = num_hiddens
+        self.landmark_sz = landmark_sz
+        self.mlp_dist = DistDecoder_Vdist2Vec(num_nodes=self.num_nodes,emb_sz=self.emb_sz,num_hiddens=self.num_hiddens)
+        self.mlp_diff = DiffDecoder_Vdist2Vec(emb_sz=self.emb_sz,num_hiddens=self.num_hiddens)
+
+    def __str__(self):
+        return 'Vdist2Vec:' + self.model_name
+
+    def _generate(self):
+        print('simulate cluster.')
+        nodes = list(self.nx_g.nodes())
+        random.shuffle(nodes)
+        landmarks = nodes[:self.landmark_sz]
+        cls_map = {landmark:landmark for landmark in landmarks}
+        diff_map = {landmark:0 for landmark in landmarks}
+        search_lst = landmarks.copy()
+        while len(search_lst) > 0:
+            cur_nid = search_lst.pop(0)
+            for nnid in self.nx_g.neighbors(cur_nid):
+                if nnid not in cls_map:
+                    cls_map[nnid] = cls_map[cur_nid]
+                    diff_map[nnid] = diff_map[cur_nid] + 1
+                    search_lst.append(nnid)
+
+        print('train distance predictor on landmarks.')
+
+        print('train differential predictor on other nodes.')
+
+
+
+
+
+
+    def _query(self,srcs,dsts):
+        pass
+
+    def _load(self):
+        if not os.path.exists(self.pwd()+'.pkl'):
+            return False
+        self._load_param_pickle()
+        return True
+
+    def _save_param_pickle(self):
+        with open(self.pwd() + '.pkl', 'wb') as f:
+            pk.dump(self.embs, f)
+            pk.dump(self.model,f)
+
+    def _load_param_pickle(self):
+        with open(self.pwd() + '.pkl', 'rb') as f:
+            self.embs = pk.load(f)
+            self.model = pk.load(f)
+
 class DistDecoder_BCDR(nn.Module):
     def __init__(self, emb_sz=16):
         super(DistDecoder_BCDR, self).__init__()
@@ -1673,6 +1998,7 @@ class BCDR(DistanceQueryModel):
             self.train_var_lst.append(p) # inner torch parameters.
 
         return ed_time
+
     def _load(self):
         if not os.path.exists(self.pwd()+'.pkl'):
             return False
@@ -1726,6 +2052,8 @@ class BCDR(DistanceQueryModel):
         assert load_dict is not None, print('cur path:{}'.format(self.pwd()))
         self.embs = tc.from_numpy(np.load(load_dict['embs_path']))
         self.model = tc.load(load_dict['model_path'],map_location=device)
+
+
 
 if __name__ == '__main__':
     print('hello dqm.')

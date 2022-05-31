@@ -79,6 +79,8 @@ def routine_eval(data_names=['cr'],dqm_names=['ado'],add_names=[None],params=[{}
                 dqm = m_dqm.SamPG(**cur_param)
             elif dqm_name == 'dadl':
                 dqm = m_dqm.DADL(**cur_param)
+            elif dqm_name == 'halk':
+                dqm = m_dqm.HALK(**cur_param)
             elif dqm_name == 'bcdr':
                 dqm = m_dqm.BCDR(**cur_param)
             assert dqm is not None, print('dqm_name', dqm_name)
@@ -224,6 +226,30 @@ def routine_eval_dadl():
     params = [comm_dict]
     routine_eval(data_names=['fb'], dqm_names=['dadl'], add_names=add_names, params=params, eval_type='all')
     # routine_eval(data_names=['cr','fb','gq'], dqm_names=['dadl'], add_names=add_names, params=params, eval_type='all')
+
+def routine_eval_halk():
+    comm_dict = {
+        'emb_sz': 16,
+        'landmark_sz':5,
+        'lr':0.01,
+        'iters':15,
+        'p':1,
+        'q':1,
+        'l':80,
+        'k':1,
+        'num_walks':10,
+        'num_workers':8,
+        'batch_node_sz':300,
+        'batch_walk_sz':10*300,
+        'init_fraction':0.1,
+        'batch_landmark_sz':1,
+        }
+
+    add_names = ['default']
+    params = [comm_dict]
+    routine_eval(data_names=['cr','fb','gq'], dqm_names=['halk'], add_names=add_names, params=params, eval_type='all')
+    # routine_eval(data_names=['cr','fb','gq'], dqm_names=['dadl'], add_names=add_names, params=params, eval_type='all')
+
 
 def routine_eval_bcdr():
     comm_dict = {
@@ -675,8 +701,9 @@ if __name__ == '__main__':
     # routine_eval_pll()
     # routine_eval_sampg()
     # routine_eval_dadl()
+    routine_eval_halk()
     # routine_eval_bcdr()
-    combine_routine_eval1()
+    # combine_routine_eval1()
     # routine_ft_bcdr()
     # routine_ver_bcdr()
     # routine_ft_bcdr_large()
