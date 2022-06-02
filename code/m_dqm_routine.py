@@ -81,6 +81,8 @@ def routine_eval(data_names=['cr'],dqm_names=['ado'],add_names=[None],params=[{}
                 dqm = m_dqm.DADL(**cur_param)
             elif dqm_name == 'halk':
                 dqm = m_dqm.HALK(**cur_param)
+            elif dqm_name == 'p2v':
+                dqm = m_dqm.Path2Vec(**cur_param)
             elif dqm_name == 'bcdr':
                 dqm = m_dqm.BCDR(**cur_param)
             assert dqm is not None, print('dqm_name', dqm_name)
@@ -250,6 +252,27 @@ def routine_eval_halk():
     routine_eval(data_names=['cr','fb','gq'], dqm_names=['halk'], add_names=add_names, params=params, eval_type='all')
     # routine_eval(data_names=['cr','fb','gq'], dqm_names=['dadl'], add_names=add_names, params=params, eval_type='all')
 
+def routine_eval_p2v():
+    comm_dict = {
+        'emb_sz': 16,
+        'landmark_sz':5,
+        'lr':0.01,
+        'iters':15,
+        'num_workers':12,
+        'batch_landmark_sz':1,
+        'fix_seed':False,
+        'neg':3,
+        'use_neighbors':False,
+        'nei_fst_coef' :0.01,
+        'nei_snd_coef' :0.01,
+        'regularize':False,
+    }
+
+    add_names = ['default']
+    params = [comm_dict]
+    routine_eval(data_names=['cr'], dqm_names=['p2v'], add_names=add_names, params=params, eval_type='all')
+    # routine_eval(data_names=['cr','fb','gq'], dqm_names=['dadl'], add_names=add_names, params=params, eval_type='all')
+
 
 def routine_eval_bcdr():
     comm_dict = {
@@ -290,7 +313,7 @@ def combine_routine_eval1():
         'emb_sz': 16,
         'use_sel': 'random',
         'init_sz': 16,
-        'landmark_sz': 100,
+        'landmark_sz': 80,
         'max_iter': [5000, 1000, 100],
         'step_len': 8,
         'tol': 1e-5,
@@ -300,7 +323,7 @@ def combine_routine_eval1():
         'emb_sz': 16,
         'use_sel': 'random',
         'init_sz': 16,
-        'landmark_sz': 100,
+        'landmark_sz': 80,
         'max_iter': [5000, 1000, 100],
         'step_len': 8,
         'tol': 1e-5,
@@ -313,7 +336,7 @@ def combine_routine_eval1():
 
     hyper_dict['dadl'] = {
         'emb_sz': 16,
-        'landmark_sz':  24,
+        'landmark_sz':  80,
         'lr': 0.01,
         'iters': 15,
         'p': 1,
@@ -321,8 +344,40 @@ def combine_routine_eval1():
         'l': 80,
         'k': 1,
         'num_walks': 12,
-        'num_workers': 5,
-        'batch_landmark_sz': 1,
+        'num_workers': 12,
+        'batch_landmark_sz': 2,
+    }
+
+    hyper_dict['halk'] = {
+        'emb_sz': 16,
+        'landmark_sz': 80,
+        'lr': 0.01,
+        'iters': 15,
+        'p': 1,
+        'q': 1,
+        'l': 80,
+        'k': 1,
+        'num_walks': 12,
+        'num_workers': 12,
+        'batch_node_sz': 500,
+        'batch_walk_sz': 12 * 500,
+        'init_fraction': 0.1,
+        'batch_landmark_sz': 2,
+    }
+
+    hyper_dict['p2v'] = {
+        'emb_sz': 16,
+        'landmark_sz': 80,
+        'lr': 0.01,
+        'iters': 15,
+        'num_workers': 12,
+        'batch_landmark_sz': 2,
+        'fix_seed': False,
+        'neg': 3,
+        'use_neighbors': False,
+        'nei_fst_coef': 0.01,
+        'nei_snd_coef': 0.01,
+        'regularize': False,
     }
 
     # hyper_dict['bcdr'] = {
@@ -344,45 +399,65 @@ def combine_routine_eval1():
     #     'out_l': 10,
     # }
 
-    model_names = ['ado','ls','pll','orion','rigel','dadl']
-    routine_eval(data_names=['cr', 'fb', 'gq'], dqm_names=model_names, add_names=['def']*len(model_names), params=[hyper_dict[ele] for ele in model_names], eval_type='all')
+    model_names = ['ado','ls','orion','rigel','dadl','halk','p2v']
+    routine_eval(data_names=['cr','fb','gq'], dqm_names=model_names, add_names=['def']*len(model_names), params=[hyper_dict[ele] for ele in model_names], eval_type='all',seed=42)
 
 def routine_ft_bcdr():
+    # comm_dict = {
+    #     'emb_sz': 16,
+    #     'landmark_sz':4,
+    #     'lr':0.01,
+    #     'iters':15,
+    #     'l':40,
+    #     'k':1,
+    #     'num_walks':10, # fine-tuned.
+    #     'num_workers':8,
+    #     'batch_landmark_sz':10,
+    #     'batch_root_sz':100,
+    #     'bc_decay':10,
+    #     'dist_decay':0.5, # fine-tuned.
+    #     'out_walks':40,
+    #     'out_l':10,
+    #     'use_sel':'rnd',
+    #     'fast_query':False,
+    #     }
+
     comm_dict = {
         'emb_sz': 16,
-        'landmark_sz':80,
-        'lr':0.01,
-        'iters':15,
-        'l':40,
-        'k':1,
-        'num_walks':10, # fine-tuned.
-        'num_workers':8,
-        'batch_landmark_sz':10,
-        'batch_root_sz':100,
-        'bc_decay':10,
-        'dist_decay':0.5, # fine-tuned.
-        'out_walks':40,
-        'out_l':10,
-        'use_sel':'rnd',
-        'fast_query':False,
-        }
-    landmark_szs = [10,30,60,90]
+        'landmark_sz': 24,
+        'lr': 0.01,
+        'iters': 15,
+        'l': 40,
+        'k': 1,
+        'num_walks': 10,  # fine-tuned.
+        'num_workers': 12,
+        'batch_landmark_sz': 1,  # decrease when massive graphs for load balancing.
+        'batch_root_sz': 100,
+        'bc_decay': 0,
+        'dist_decay': 0.35,  # fine-tuned.
+        'out_walks': 40,
+        'out_l': 10,
+        'use_sel': 'deg',
+        'fast_query': False,
+    }
+
+    landmark_szs = [4,8,12,24]
     batch_landmark_sz_cs = [2,4,4,6]
 
     iters = [5,10,20,40]
-    num_walks = [10,20,40]
-    bc_decays = [3,5,10,20,40]
+    num_walks = [4,8,12]
+    bc_decays = [-10,-2,-1,0,1,2,4]
     # dist_decays = [0.1,0.5,0.9,0.98,0.999]
-    dist_decays = [0.05 * ele for ele in range(1,20)]
+    dist_decays = [0.2,0.35,0.45,0.5,0.9,0.98]
     use_sels = ['deg','rnd']
     fast_querys = [True,False]
 
-    # print('param landmark sz...')
-    # params = [comm_dict.copy() for _ in range(len(landmark_szs))]
-    # for param,landmark_sz,batch_landmark_sz in zip(params,landmark_szs,batch_landmark_sz_cs):
-    #     param['landmark_sz'] = landmark_sz
-    #     param['batch_landmark_sz'] = batch_landmark_sz
-    # routine_eval(data_names=['cr', 'fb', 'gq'], dqm_names=['bcdr']*len(landmark_szs), add_names=[f'_lsz_{ele}' for ele in landmark_szs], params=params, eval_type='all')
+    print('param landmark sz...')
+    params = [comm_dict.copy() for _ in range(len(landmark_szs))]
+    for param,landmark_sz,batch_landmark_sz in zip(params,landmark_szs,batch_landmark_sz_cs):
+        param['landmark_sz'] = landmark_sz
+        param['batch_landmark_sz'] = batch_landmark_sz
+    routine_eval(data_names=['cr', 'fb', 'gq'], dqm_names=['bcdr']*len(landmark_szs), add_names=[f'_lsz_{ele}' for ele in landmark_szs], params=params, eval_type='all')
     #
     # print('param iters...')
     # params = [comm_dict.copy() for _ in range(len(iters))]
@@ -390,20 +465,20 @@ def routine_ft_bcdr():
     #     param['iters'] = iter
     # routine_eval(data_names=['cr', 'fb', 'gq'], dqm_names=['bcdr']*len(iters), add_names=[f'_it_{ele}' for ele in iters], params=params, eval_type='all')
     #
-    # print('param num_walks...')
-    # params = [comm_dict.copy() for _ in range(len(num_walks))]
-    # for param, num_walk in zip(params, num_walks):
-    #     param['num_walks'] = num_walk
-    # routine_eval(data_names=['cr', 'fb', 'gq'], dqm_names=['bcdr'] * len(num_walks),
-    #              add_names=[f'_nwlk_{ele}' for ele in num_walks], params=params, eval_type='all')
-    #
-    # print('param bc_decays...')
-    # params = [comm_dict.copy() for _ in range(len(bc_decays))]
-    # for param, bc_decay in zip(params, bc_decays):
-    #     param['bc_decay'] = bc_decay
-    # routine_eval(data_names=['cr', 'fb', 'gq'], dqm_names=['bcdr'] * len(bc_decays),
-    #              add_names=[f'_bcd_{ele}' for ele in bc_decays], params=params, eval_type='all')
-    #
+    print('param num_walks...')
+    params = [comm_dict.copy() for _ in range(len(num_walks))]
+    for param, num_walk in zip(params, num_walks):
+        param['num_walks'] = num_walk
+    routine_eval(data_names=['cr', 'fb', 'gq'], dqm_names=['bcdr'] * len(num_walks),
+                 add_names=[f'_nwlk_{ele}' for ele in num_walks], params=params, eval_type='all')
+
+    print('param bc_decays...')
+    params = [comm_dict.copy() for _ in range(len(bc_decays))]
+    for param, bc_decay in zip(params, bc_decays):
+        param['bc_decay'] = bc_decay
+    routine_eval(data_names=['cr', 'fb', 'gq'], dqm_names=['bcdr'] * len(bc_decays),
+                 add_names=[f'_bcd_{ele}' for ele in bc_decays], params=params, eval_type='all')
+
     print('param dist_decays...')
     params = [comm_dict.copy() for _ in range(len(dist_decays))]
     for param, dist_decay in zip(params, dist_decays):
@@ -449,18 +524,37 @@ def routine_ver_bcdr():
         'use_sel': 'rnd',
         'fast_query': False,
     }
+    # comm_dict = {
+    #     'emb_sz': 16,
+    #     'landmark_sz': 24,
+    #     'lr': 0.01,
+    #     'iters': 15,
+    #     'l': 40,
+    #     'k': 1,
+    #     'num_walks': 10,  # fine-tuned.
+    #     'num_workers': 12,
+    #     'batch_landmark_sz': 1,  # decrease when massive graphs for load balancing.
+    #     'batch_root_sz': 100,
+    #     'bc_decay': 0,
+    #     'dist_decay': 0.35,  # fine-tuned.
+    #     'out_walks': 40,
+    #     'out_l': 10,
+    #     'use_sel': 'deg',
+    #     'fast_query': False,
+    # }
 
-    add_names = ['comm','acc','fquery','fcons']
-    params = [comm_dict.copy(),comm_dict.copy(),comm_dict.copy(),comm_dict.copy()]
-    params[1]['num_walks'] = 40
-    params[1]['iters'] = 20
-    params[2]['fast_query'] = True
-    params[3]['num_walks']=10
-    params[3]['landmark_sz'] = 20
-    # params[2]['iters'] = 10
+    add_names = ['comm','fquery','fcons']
+    params = [comm_dict.copy(),comm_dict.copy(),comm_dict.copy()]
+    params[1]['fast_query'] = True
+    params[2]['num_walks'] = 5
+    # params[1]['num_walks'] = 40
+    # params[1]['iters'] = 20
+    # params[2]['fast_query'] = True
+    # params[3]['num_walks']=10
+    # params[3]['landmark_sz'] = 20
+    # # params[2]['iters'] = 10
 
-
-    routine_eval(data_names=['cr','fb','gq'], dqm_names=['bcdr']*4, add_names=add_names, params=params, eval_type='all',seed=198)
+    routine_eval(data_names=['cr','fb','gq'], dqm_names=['bcdr']*3, add_names=add_names, params=params, eval_type='all',seed=42)
 
 
 def combine_routine_eval_large1():
@@ -701,9 +795,10 @@ if __name__ == '__main__':
     # routine_eval_pll()
     # routine_eval_sampg()
     # routine_eval_dadl()
-    routine_eval_halk()
+    # routine_eval_halk()
+    # routine_eval_p2v()
     # routine_eval_bcdr()
-    # combine_routine_eval1()
+    combine_routine_eval1()
     # routine_ft_bcdr()
     # routine_ver_bcdr()
     # routine_ft_bcdr_large()

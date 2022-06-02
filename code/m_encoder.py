@@ -1,3 +1,5 @@
+import sys
+
 from embedding_proc import Embedding
 import m_deepwalk
 import os
@@ -241,6 +243,11 @@ class Node2VecEncoder(Encoder):
         #                  iter=self.iter)
         model = gs.models.Word2Vec(walks, vector_size=self.emb_sz, window=self.window_sz, min_count=0, sg=1,workers=self.workers,epochs=self.iter)
         model.wv.save_word2vec_format(os.path.join(self.out_dir, self.out_file))
+
+        mem_usage = 0.
+        mem_usage += sys.getsizeof(list(nx_G.edges()))
+        mem_usage += sum([sys.getsizeof(walk) for walk in walks])
+        return mem_usage
     def save(self):
         pass
 

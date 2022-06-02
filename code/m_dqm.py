@@ -21,11 +21,23 @@ import gensim as gs
 import time
 import pickle as pk
 import tqdm
+from keras.preprocessing.sequence import skipgrams
+from numpy import float32 as real
 from karateclub.utils.walker import BiasedRandomWalker
 
 # device = tc.device('cuda:0' if tc.cuda.is_available() else 'cpu')
 device = 'cpu'
 
+'''
+Global.
+'''
+# path2vec.
+neighbors_dict = dict()
+current_pos_samples = [[], []]
+
+'''
+Model.
+'''
 class DistanceQueryModel:
     def __init__(self,nx_g=None,model_name='dqm',tmp_dir='../tmp',force=False,**kwargs):
         self.nx_g = nx_g
@@ -37,6 +49,8 @@ class DistanceQueryModel:
         self.query_var_lst = []
         self.train_var_id_set = set()
         self.query_var_id_set = set()
+        self.add_train_mem = 0.
+        self.add_query_mem = 0.
     def generate(self):
         if not self.force and self.load():
             print('--{}-- tmp file checked&loaded.'.format(self.model_name))
@@ -63,13 +77,13 @@ class DistanceQueryModel:
     # @Optional
     def get_mem_usage(self,is_train=True):
         if is_train:
-            return sum([self._ex_getsizeof(ele) for ele in self.train_var_lst]) / 1024 / 1024
+            return (sum([self._ex_getsizeof(ele) for ele in self.train_var_lst]) + self.add_train_mem) / 1024 / 1024
         else:
-            return sum([self._ex_getsizeof(ele) for ele in self.query_var_lst]) / 1024 / 1024
+            return (sum([self._ex_getsizeof(ele) for ele in self.query_var_lst]) + self.add_query_mem) / 1024 / 1024
 
     def _ex_getsizeof(self,ele):
         if type(ele) is tc.Tensor:
-            return sys.getsizeof(ele.numpy())
+            return sys.getsizeof(np.array(ele))
         return  sys.getsizeof(ele)
 
     # @Optional
@@ -486,7 +500,6 @@ class LandmarkSelection(DistanceQueryModel):
         assert load_dict is not None, print('cur path:{}'.format(self.pwd()))
         self.v2emb = load_dict['v2emb']
 
-
 class Orion(DistanceQueryModel):
     def __init__(self,use_sel='random',emb_sz=16,init_sz=16,landmark_sz=100,batch_node_sz=1,max_iter=[5000,1000,100],step_len=5,tol=1e-5,**kwargs):
         '''
@@ -814,7 +827,7 @@ class Rigel(Orion):
         ed_time = time.time()
         self.query_var_lst = []
         self.query_var_lst.append(self.embs)
-        self.query_var_lst.append(self.nx_g)
+        # self.query_var_lst.append(self.nx_g)
         self.query_var_lst.append(list(self.nx_g.edges()))
 
         return dists,ed_time
@@ -1260,7 +1273,6 @@ class TreeSampling:
         assert self.n_labs[x] == 0 and self.n_pairs[x] == 0
         self.in_trees[x] = None
 
-
 class DistDecoder_DADL(nn.Module):
     def __init__(self, emb_sz=16):
         super(DistDecoder_DADL, self).__init__()
@@ -1363,7 +1375,7 @@ class DADL(DistanceQueryModel):
                                   num_walks=self.num_walks, walk_lens=self.l, window_sz=self.l, p=1, q=1, iter=1, is_directed=False,
                                   is_weighted=False, weight_arr=None)
         st_time = time.time()
-        encoder.train()
+        mem_usage = encoder.train()
         out_g = encoder.load()
         self.embs = out_g.ndata['emb']
         print('encoder consume {:.2f}'.format(time.time() - st_time))
@@ -1416,6 +1428,8 @@ class DADL(DistanceQueryModel):
         self.train_var_lst.append(list(self.nx_g.edges()))
         self.train_var_lst.append(train_pairs)
         self.train_var_lst.append(landmarks)
+        self.add_train_mem = 0.
+        self.add_train_mem = mem_usage
         for p in self.model.parameters():
             self.train_var_lst.append(p) # inner torch parameters.
 
@@ -1457,11 +1471,13 @@ class DADL(DistanceQueryModel):
         with open(self.pwd() + '.pkl', 'wb') as f:
             pk.dump(self.embs, f)
             pk.dump(self.model, f)
+            pk.dump(self.nx_g,f)
 
     def _load_param_pickle(self):
         with open(self.pwd() + '.pkl', 'rb') as f:
             self.embs = pk.load(f)
             self.model = pk.load(f)
+            self.nx_g = pk.load(f)
 
     def _load_param(self):
         with open(self.pwd() + '.json', 'r') as f:
@@ -1470,10 +1486,9 @@ class DADL(DistanceQueryModel):
         self.embs = tc.from_numpy(np.load(load_dict['embs_path']))
         self.model = tc.load(load_dict['model_path'],map_location=device)
 
-
-class DistDecoder_DADL(nn.Module):
+class DistDecoder_HALK(nn.Module):
     def __init__(self, emb_sz=16):
-        super(DistDecoder_DADL, self).__init__()
+        super(DistDecoder_HALK, self).__init__()
         self.emb_sz = emb_sz
         self.lin1 = nn.Linear(emb_sz * 2, emb_sz)
         self.lin2 = nn.Linear(emb_sz, 1)
@@ -1611,7 +1626,7 @@ class HALK(DistanceQueryModel):
         # train NN.
         print('{} start to train NN Distance Decoder...'.format(self))
         st_time = time.time()
-        self.model = DistDecoder_DADL(emb_sz=self.emb_sz)
+        self.model = DistDecoder_HALK(emb_sz=self.emb_sz)
         loss = nn.MSELoss(reduction='sum')
         optim = tc.optim.Adam(self.model.parameters(), lr=self.lr)
         self.model.to(device)
@@ -1654,8 +1669,469 @@ class HALK(DistanceQueryModel):
         self.train_var_lst.append(list(self.nx_g.edges()))
         self.train_var_lst.append(train_pairs)
         self.train_var_lst.append(landmarks)
+        for walk in walks:
+            self.train_var_lst.append(walk)
         for p in self.model.parameters():
             self.train_var_lst.append(p) # inner torch parameters.
+        return ed_time
+
+    def _load(self):
+        if not os.path.exists(self.pwd()+'.pkl'):
+            return False
+        self._load_param_pickle()
+        return True
+
+    def _query(self,srcs,dsts):
+        emb_srcs = self.embs[srcs].to(device)
+        emb_dsts = self.embs[dsts].to(device)
+        dists = self.model(emb_srcs, emb_dsts)
+        for idx in range(srcs.shape[0]):
+            if int(srcs[idx]) == int(dsts[idx]):
+                dists[idx] = 0.
+            elif int(dsts[idx]) in set(self.nx_g.neighbors(int(srcs[idx]))):
+                dists[idx] = 1.
+        ed_time = time.time()
+
+        self.query_var_lst = []
+        self.query_var_lst.append(self.embs)
+        for p in self.model.parameters():
+            self.query_var_lst.append(p) # inner torch parameters.
+        self.query_var_lst.append(list(self.nx_g.edges()))
+
+        return dists.view(-1),ed_time
+
+    def _save_param(self):
+        save_dict = {'embs_path': self.pwd() + '.embs.npy','model_path':self.pwd()+'.model'}
+        with open(self.pwd() + '.json', 'w') as f:
+            json.dump(save_dict, f)
+        np.save(self.pwd() + '.embs.npy', self.embs.numpy())
+        tc.save(self.model,self.pwd()+'.model')
+
+    def _save_param_pickle(self):
+        with open(self.pwd() + '.pkl', 'wb') as f:
+            pk.dump(self.embs, f)
+            pk.dump(self.model, f)
+            pk.dump(self.nx_g,f)
+
+    def _load_param_pickle(self):
+        with open(self.pwd() + '.pkl', 'rb') as f:
+            self.embs = pk.load(f)
+            self.model = pk.load(f)
+            self.nx_g = pk.load(f)
+
+    def _load_param(self):
+        with open(self.pwd() + '.json', 'r') as f:
+            load_dict = json.load(f)
+        assert load_dict is not None, print('cur path:{}'.format(self.pwd()))
+        self.embs = tc.from_numpy(np.load(load_dict['embs_path']))
+        self.model = tc.load(load_dict['model_path'],map_location=device)
+
+class DistDecoder_Path2Vec(nn.Module):
+    def __init__(self, emb_sz=16):
+        super(DistDecoder_Path2Vec, self).__init__()
+        self.emb_sz = emb_sz
+        self.lin1 = nn.Linear(emb_sz * 2, emb_sz)
+        self.lin2 = nn.Linear(emb_sz, 1)
+
+    def forward(self, src, dst):
+        out = self.lin1(tc.cat((src, dst), dim=1))
+        out = F.relu(out)
+        out = self.lin2(out)
+        out = F.softplus(out)
+        return out
+
+class Path2VecModel(nn.Module):
+
+    def __init__(self, vocab_size, embedding_dim):
+        super(Path2VecModel, self).__init__()
+        self.embeddings = nn.Embedding(vocab_size, embedding_dim)
+
+    def forward(self, inputs):
+        embed1 = self.embeddings(inputs[0])
+        embed2 = self.embeddings(inputs[1])
+        # normalize the vectors before the dot product so that dot product is the cosine proximity between the two vectors
+        embed1 = embed1 / embed1.norm(2, 2, True).clamp(min=1e-12).expand_as(embed1)
+        embed2 = embed2 / embed2.norm(2, 2, True).clamp(min=1e-12).expand_as(embed2)
+        out = tc.sum(embed1 * embed2, dim=2)
+
+        return out
+
+class Path2Vec(DistanceQueryModel):
+    def __init__(self,emb_sz=16,landmark_sz=100,lr=0.01,iters=15,num_workers=8,batch_landmark_sz=5,fix_seed=False,neg=3,nei_fst_coef=0.01,nei_snd_coef=0.01,use_neighbors=True,regularize=False,**kwargs):
+        '''
+        :param emb_sz: model embedding size
+        :param landmark_sz: landmark size for training node pair
+        :param lr: learning rate in NN.
+        :param iters: total iterations in NN.
+        :param kwargs:
+        '''
+        super(Path2Vec, self).__init__(**kwargs)
+        self.emb_sz = emb_sz
+        self.landmark_sz = landmark_sz
+        self.lr = lr
+        self.iters = iters
+        self.num_workers=num_workers
+        self.batch_landmark_sz = batch_landmark_sz
+        self.fix_seed = fix_seed
+        self.neg = neg
+        self.use_neighbors = use_neighbors
+        self.nei_fst_coef = nei_fst_coef
+        self.nei_snd_coef = nei_snd_coef
+        self.regularize = regularize
+        self.storage_lst = [self.pwd() + '.pkl']
+
+    def __str__(self):
+        return 'Path2Vec:' + self.model_name
+
+    @staticmethod
+    def _s_gen_train_pair(landmarks,nx_g,**kwargs):
+        # nx_g = nx.Graph()
+        pid = kwargs['__PID__']
+        train_pairs = []
+        for landmark in landmarks:
+            search_lst = [landmark]
+            dist_map = {landmark:0}
+            while len(search_lst) != 0:
+                cur_nid = search_lst.pop(0)
+                for nnid in nx_g.neighbors(cur_nid):
+                    if nnid not in dist_map:
+                        dist_map[nnid] = dist_map[cur_nid] + 1
+                        search_lst.append(nnid)
+            for nid in dist_map:
+                if dist_map[nid] >= 1:
+                    train_pairs.append([landmark,nid,dist_map[nid]])
+        return train_pairs
+
+    def build_vocabulary(self,pairs):
+        """
+        Generates vocabulary from the sentences
+        Counts the total number of training pairs
+        Outputs this number, vocabulary and inverted vocabulary
+        """
+        vocabulary = {}
+        train_pairs = 0
+        for pair in pairs:
+            (word0, word1, similarity) = pair
+            train_pairs += 1
+            for word in [word0, word1]:
+                vocabulary[word] = 0
+        print('Vocabulary size = %d' % len(vocabulary), file=sys.stderr)
+        print('Total word pairs in the training set = %d' % train_pairs, file=sys.stderr)
+        inv_vocab = sorted(vocabulary.keys())
+        inv_vocab.insert(0, 'UNK')
+        for word in inv_vocab:
+            vocabulary[word] = inv_vocab.index(word)
+        return train_pairs, vocabulary, inv_vocab
+
+    def get_negative_samples(self,current_word_index, context_word_index, vocab_size, nsize):
+        # Generate random negative samples, by default the same number as positive samples
+        neg_samples = skipgrams([current_word_index, context_word_index], vocab_size, window_size=1,
+                                negative_samples=nsize)
+        return neg_samples
+
+    def batch_generator_2(self,pairs, vocabulary, vocab_size, nsize, batch_size):
+        """
+        Generates training batches
+        """
+        global current_pos_samples
+        timing = False  # Whether to print out batch generation time
+
+        samples_per_pair = 2 + 2 * nsize  # How many training instances we get from each pair
+        # How many samples will be there in each batch?
+        samples_per_batch = samples_per_pair * batch_size
+
+        inputs_list = [np.zeros((samples_per_batch, 1), dtype=int),
+                       np.zeros((samples_per_batch, 1), dtype=int)]
+
+        # Batch should be a tuple of inputs and targets. First we create it empty:
+        batch = (inputs_list, np.zeros((samples_per_batch, 1)))
+        inst_counter = 0
+        start = time.time()
+        for pair in pairs:
+            # split the line on tabs
+            sequence = pair
+            words = sequence[:2]
+            if words[0] not in vocabulary or words[1] not in vocabulary:
+                continue
+            sim = np.float64(sequence[2])
+
+            # Convert real words to indexes
+            sent_seq = [vocabulary[word] for word in words]
+
+            current_word_index = sent_seq[0]
+            context_word_index = sent_seq[1]
+
+            current_pos_samples[0].append(current_word_index)
+            current_pos_samples[1].append(context_word_index)
+
+            # get negative samples for the current pair
+            neg_samples = self.get_negative_samples(
+                current_word_index, context_word_index, vocab_size, nsize)
+
+            # Adding two positive examples and the corresponding negative samples to the current batch
+            for i in range(samples_per_pair):
+                batch[0][0][inst_counter] = neg_samples[0][i][0]
+                batch[0][1][inst_counter] = neg_samples[0][i][1]
+
+                pred_sim = neg_samples[1][i]
+                # if this is a positive example, replace 1 with the real similarity from the file:
+                if pred_sim != 0:
+                    pred_sim = sim
+                batch[1][inst_counter] = pred_sim
+                inst_counter += 1
+            if inst_counter == samples_per_batch:
+                yield batch
+                end = time.time()
+                if timing:
+                    print('Batch generation took', end - start, file=sys.stderr)
+                inst_counter = 0
+                inputs_list = [np.zeros((samples_per_batch, 1), dtype=int),
+                               np.zeros((samples_per_batch, 1), dtype=int)]
+
+                batch = (inputs_list, np.zeros((samples_per_batch, 1)))
+                current_pos_samples = [[], []]
+                start = time.time()
+
+        # return the remaining samples
+        yield batch
+
+    def custom_loss(self,y_pred, y_true, reg_1_output, reg_2_output, use_neighbors, beta=0.01, gamma=0.01):
+        if use_neighbors:
+            alpha = 1 - (beta + gamma)
+            m_loss = alpha * F.mse_loss(y_pred, y_true, reduction='elementwise_mean')
+
+            m_loss -= beta * reg_1_output
+            m_loss -= gamma * reg_2_output
+        else:
+            m_loss = F.mse_loss(y_pred, y_true, reduction='elementwise_mean')
+
+        return m_loss
+
+    def save_word2vec_format(self,fname, vocab, vectors, binary=False):
+        """Store the input-hidden weight matrix in the same format used by the original
+            C word2vec-tool, for compatibility.
+            Parameters
+            ----------
+            fname : str
+                The file path used to save the vectors in
+            vocab : dict
+                The vocabulary of words with their ranks
+            vectors : numpy.array
+                The vectors to be stored
+            binary : bool
+                If True, the data wil be saved in binary word2vec format, else in plain text.
+            """
+        if not (vocab or vectors):
+            raise RuntimeError('no input')
+        total_vec = len(vocab)
+        vector_size = vectors.shape[1]
+        print('storing %dx%d projection weights into %s' % (total_vec, vector_size, fname))
+        assert (len(vocab), vector_size) == vectors.shape
+        # with utils.smart_open(fname, 'wb') as fout:
+        with open(fname, 'wb') as fout:
+            fout.write(gs.utils.to_utf8('%s %s\n' % (total_vec, vector_size)))
+            position = 0
+            for element in sorted(vocab, key=lambda word: vocab[word]):
+                row = vectors[position]
+                if binary:
+                    row = row.astype(real)
+                    fout.write(gs.utils.to_utf8(element) + b" " + row.tostring())
+                else:
+                    fout.write(gs.utils.to_utf8('%s %s\n' % (element, ' '.join(repr(val) for val in row))))
+                position += 1
+
+    def save_embeddings(self,filename, model, vocab_dict):
+        # Saving the resulting vectors
+        embeddings = model.state_dict()['embeddings.weight']
+        # if tc.cuda.is_available():
+        #     embeddings = embeddings.cpu()
+        self.save_word2vec_format(filename, vocab_dict, embeddings.numpy())
+
+    def _generate(self):
+        global neighbors_dict
+        global current_pos_samples
+
+        # self.nx_g = nx.DiGraph()
+        # gen train pairs.
+        mpm = utils.MPManager(batch_sz=self.batch_landmark_sz, num_workers=self.num_workers, use_shuffle=False)
+        nodes = list(self.nx_g.nodes())
+        random.shuffle(nodes)
+        landmarks = nodes[:self.landmark_sz]
+        train_pairs = mpm.multi_proc(Path2Vec._s_gen_train_pair,[landmarks],nx_g=self.nx_g,auto_concat=True)
+
+        # train embs with path2vec.
+        print('{} start to train embeddings with path2vec...'.format(self))
+        st_time = time.time()
+
+        if self.fix_seed:
+            # fix seeds for repeatability of experiments
+            np.random.seed(42)
+            random.seed(12345)
+            tc.manual_seed(1)
+            if tc.cuda.is_available():
+                tc.cuda.manual_seed(1)
+
+        print('Retreiving neighbors of training samples...')
+        # helpers.build_connections(vocab_dict)
+        no_train_pairs, vocab_dict, inverted_vocabulary = self.build_vocabulary(train_pairs)
+
+        vocab_size = len(vocab_dict)
+
+        # instantiate the model
+        model_p2v = Path2VecModel(vocab_size, self.emb_sz)
+
+        # # use GPU if available
+        # if torch.cuda.is_available():
+        #     model.cuda()
+        #     torch.cuda.manual_seed(1)
+        #     print("Using GPU...")
+
+        optimizer = tc.optim.Adam(model_p2v.parameters(), lr=0.001)
+
+        print('Model name and layers:')
+        print(model_p2v)
+
+        # begin the training..
+        for epoch in range(10):
+            print('Epoch #', epoch + 1)
+            total_loss, n_batches = 0, 0
+            batchGenerator = self.batch_generator_2(train_pairs, vocab_dict, vocab_size, self.neg, batch_size=100)
+            for batch in batchGenerator:
+                n_batches += 1
+                l1_reg_term = 0
+                inputs, targets = batch
+                target_tensor = tc.from_numpy(targets).float()
+
+                input_var = tc.Tensor([inputs[0], inputs[1]]).long()
+                # if tc.cuda.is_available():
+                #     input_var = input_var.cuda()
+                #     target_tensor = target_tensor.cuda()
+
+                model_p2v.zero_grad()
+                # do the forward pass
+                similarity_pred = model_p2v(input_var)
+
+                reg1_output = 0.
+                reg2_output = 0.
+
+                if self.use_neighbors:
+                    # get only the positive samples because the batch variable contains the generated negatives as well
+                    positive_samples = current_pos_samples
+                    inputs_list = [[], []]
+                    for word_idx in positive_samples[0]:
+                        neighbors = neighbors_dict[word_idx]
+                        for neighbor in neighbors:
+                            inputs_list[0].append([word_idx])
+                            inputs_list[1].append([neighbor])
+
+                    input_var = tc.Tensor(inputs_list).long()
+                    # if tc.cuda.is_available():
+                    #     input_var = input_var.cuda()
+
+                    reg1_dot_prod = model_p2v(input_var)
+                    reg1_output = tc.sum(reg1_dot_prod) / len(reg1_dot_prod)
+
+                    inputs_list = [[], []]
+                    for word_idx in positive_samples[1]:  # context words
+                        neighbors = neighbors_dict[word_idx]
+                        for neighbor in neighbors:
+                            inputs_list[0].append([word_idx])
+                            inputs_list[1].append([neighbor])
+
+                    input_var = tc.Tensor(inputs_list).long()
+                    if tc.cuda.is_available():
+                        input_var = input_var.cuda()
+
+                    reg2_dot_prod = model_p2v(input_var)
+                    reg2_output = tc.sum(reg2_dot_prod) / len(reg2_dot_prod)
+
+                # Compute the loss function.
+                loss = self.custom_loss(similarity_pred, target_tensor, reg1_output, reg2_output, self.use_neighbors, self.nei_fst_coef, self.nei_snd_coef)
+                if self.regularize:
+                    for param in model_p2v.parameters():
+                        l1_reg_term += tc.norm(param, 1)
+                    l1_factor = 1e-10
+                    loss += l1_factor * l1_reg_term
+
+                # Do the backward pass and update the gradient
+                loss.backward()
+                optimizer.step()
+
+                # normalize the loss per batch size
+                total_loss += loss.item() / len(inputs[0])
+
+            print('Total loss = ', total_loss / n_batches)
+        # time_id = time.time()
+        file_name = self.pwd()+'.tmp'
+        self.save_embeddings(file_name, model_p2v, vocab_dict)
+        with open(file_name,'r') as f:
+            n,m = str(f.readline()).strip().split()
+            embs = np.zeros(shape=(int(n) - 1,int(m)))
+            assert (int(n) - 1) == self.nx_g.number_of_nodes() and int(m) == self.emb_sz, print(f'n={n},m={m},num_nodes={self.nx_g.number_of_nodes()},emb_sz={self.emb_sz}')
+            for line in f.readlines():
+                line = line.strip()
+                if line != '':
+                    lst = line.split()
+                    if str(lst[0]) == 'UNK':
+                        continue
+                    embs[int(lst[0]),:] = np.array([float(ele) for ele in lst[1:]])
+        self.embs = tc.as_tensor(tc.from_numpy(embs),dtype=tc.float32)
+        print('{} train embeddings finished with time {:.4f}s'.format(self,time.time()-st_time))
+
+        # train NN.
+        print('{} start to train NN Distance Decoder...'.format(self))
+        train_pairs = tc.FloatTensor(train_pairs)
+        st_time = time.time()
+        self.model = DistDecoder_Path2Vec(emb_sz=self.emb_sz)
+        loss = nn.MSELoss(reduction='sum')
+        optim = tc.optim.Adam(self.model.parameters(), lr=self.lr)
+        self.model.to(device)
+        pair_idx = list(range(len(train_pairs)))
+        self.model.train()
+        for e_iter in range(self.iters):
+            random.shuffle(pair_idx)
+            train_pairs = train_pairs[pair_idx]
+            train_batch_sz = 128
+            pnt = 0
+            train_loss = 0.
+            cur_len = 0
+            while pnt < len(train_pairs):
+                optim.zero_grad()
+                batch_idx = pnt,min(pnt + train_batch_sz,len(train_pairs))
+                pnt += batch_idx[1] - batch_idx[0]
+                batch_in = train_pairs[batch_idx[0]:batch_idx[1]]
+                srcs = batch_in[:,0].long()
+                dsts = batch_in[:,1].long()
+                dists = batch_in[:,2].float()
+                emb_srcs = self.embs[srcs]
+                emb_dsts = self.embs[dsts]
+                dists = dists.to(device)
+                emb_srcs = emb_srcs.to(device)
+                emb_dsts = emb_dsts.to(device)
+                pred_dists = self.model(emb_srcs,emb_dsts)
+                batch_loss = loss(pred_dists,dists.view(-1,1))
+                batch_loss.backward()
+                optim.step()
+                train_loss += batch_loss.item()
+                print('\titer {} | batch {}/{} | loss:{:.5f}'.format(e_iter,pnt,len(train_pairs),train_loss / pnt))
+            print('iter {} finished | loss:{:.5f}'.format(e_iter,train_loss / pnt))
+        print('{} train NN Distance Decoder finished with time {:.4f}s'.format(self,time.time() - st_time))
+        self._save_param_pickle()
+
+        ed_time = time.time()
+
+        # anal mem.
+        self.train_var_lst.append(self.embs)
+        self.train_var_lst.append(list(self.nx_g.edges()))
+        self.train_var_lst.append(train_pairs)
+        self.train_var_lst.append(landmarks)
+        self.train_var_lst.append(vocab_dict)
+        for v in vocab_dict:
+            self.train_var_lst.append(vocab_dict[v])
+        for p in self.model.parameters():
+            self.train_var_lst.append(p) # inner torch parameters.
+        for p in model_p2v.parameters():
+            self.query_var_lst.append(p)  # inner torch parameters.
 
         return ed_time
 
@@ -1695,11 +2171,13 @@ class HALK(DistanceQueryModel):
         with open(self.pwd() + '.pkl', 'wb') as f:
             pk.dump(self.embs, f)
             pk.dump(self.model, f)
+            pk.dump(self.nx_g,f)
 
     def _load_param_pickle(self):
         with open(self.pwd() + '.pkl', 'rb') as f:
             self.embs = pk.load(f)
             self.model = pk.load(f)
+            self.nx_g = pk.load(f)
 
     def _load_param(self):
         with open(self.pwd() + '.json', 'r') as f:
@@ -1707,9 +2185,6 @@ class HALK(DistanceQueryModel):
         assert load_dict is not None, print('cur path:{}'.format(self.pwd()))
         self.embs = tc.from_numpy(np.load(load_dict['embs_path']))
         self.model = tc.load(load_dict['model_path'],map_location=device)
-
-
-
 
 class DistDecoder_Vdist2Vec(nn.Module):
     def __init__(self, num_nodes,emb_sz,num_hiddens):
@@ -2024,7 +2499,8 @@ class BCDR(DistanceQueryModel):
         self.query_var_lst.append(self.model)
         for p in self.model.parameters():
             self.query_var_lst.append(p) # inner torch parameters.
-        self.query_var_lst.append(list(self.nx_g.edges()))
+        if not self.fast_query:
+            self.query_var_lst.append(list(self.nx_g.edges()))
 
         return dists.view(-1),ed_time
 
@@ -2052,8 +2528,6 @@ class BCDR(DistanceQueryModel):
         assert load_dict is not None, print('cur path:{}'.format(self.pwd()))
         self.embs = tc.from_numpy(np.load(load_dict['embs_path']))
         self.model = tc.load(load_dict['model_path'],map_location=device)
-
-
 
 if __name__ == '__main__':
     print('hello dqm.')
