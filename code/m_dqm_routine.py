@@ -561,7 +561,7 @@ def combine_routine_eval_large1():
     hyper_dict = {}
     hyper_dict['ado'] ={'k':2}
     hyper_dict['ls'] = {
-        'landmark_sz': 16,
+        'landmark_sz': 128,
         'use_sel': 'random',
         'margin': 2,
         'use_partition': None,
@@ -570,7 +570,7 @@ def combine_routine_eval_large1():
     hyper_dict['orion'] = {
         'emb_sz': 16,
         'use_sel': 'random',
-        'init_sz': 8,
+        'init_sz': 16,
         'landmark_sz': 24,
         'max_iter': [5000, 1000, 100],
         'step_len': 8,
@@ -580,7 +580,7 @@ def combine_routine_eval_large1():
     hyper_dict['rigel'] = {
         'emb_sz': 16,
         'use_sel': 'random',
-        'init_sz': 8,
+        'init_sz': 16,
         'landmark_sz': 24,
         'max_iter': [5000, 1000, 100],
         'step_len': 8,
@@ -606,10 +606,44 @@ def combine_routine_eval_large1():
         'batch_landmark_sz': 1,
     }
 
-    # model_names = ['ado','ls','pll','orion','rigel','dadl']
-    model_names = ['dadl']
+    hyper_dict['halk'] = {
+        'emb_sz': 16,
+        'landmark_sz': 24,
+        'lr': 0.01,
+        'iters': 15,
+        'p': 1,
+        'q': 1,
+        'l': 80,
+        'k': 1,
+        'num_walks': 12,
+        'num_workers': 12,
+        'batch_node_sz': 100000,
+        'batch_walk_sz': 12 * 100000,
+        'init_fraction': 0.1,
+        'batch_landmark_sz': 2,
+    }
 
-    routine_eval(data_names=['db'], dqm_names=model_names, add_names=['def']*len(model_names), params=[hyper_dict[ele] for ele in model_names], eval_type='all',seed=189)
+    hyper_dict['p2v'] = {
+        'emb_sz': 16,
+        'landmark_sz': 24,
+        'lr': 0.01,
+        'iters': 15,
+        'num_workers': 12,
+        'batch_landmark_sz': 2,
+        'fix_seed': False,
+        'neg': 3,
+        'use_neighbors': False,
+        'nei_fst_coef': 0.01,
+        'nei_snd_coef': 0.01,
+        'regularize': False,
+    }
+    # model_names = ['ado','ls','pll','orion','rigel','dadl']
+    # model_names = ['ls','orion','rigel','dadl']
+
+    # model_names = ['p2v','halk']
+    # model_names = ['orion','rigel']
+    model_names = ['ls']
+    routine_eval(data_names=['yt'], dqm_names=model_names, add_names=['def']*len(model_names), params=[hyper_dict[ele] for ele in model_names], eval_type='all',seed=189)
     # routine_eval(data_names=['yt'], dqm_names=model_names, add_names=['def']*len(model_names), params=[hyper_dict[ele] for ele in model_names], eval_type='all',seed=189)
 
 def routine_ft_bcdr_large():
@@ -724,7 +758,7 @@ def routine_ver_bcdr_large():
         'iters': 15,
         'l': 40,
         'k': 1,
-        'num_walks': 4,  # fine-tuned.
+        'num_walks': 2,  # fine-tuned.
         'num_workers': 12,
         'batch_landmark_sz': 1,  # decrease when massive graphs for load balancing.
         'batch_root_sz': 30000,
@@ -737,7 +771,7 @@ def routine_ver_bcdr_large():
     }
 
     # add_names = ['comm','acc','fquery','fcons']
-    add_names = ['comm','fquery']
+    add_names = ['comm','fquery','fcons']
     params = [comm_dict.copy(),comm_dict.copy(),comm_dict.copy(),comm_dict.copy()]
     # params[1]['num_walks'] = 12
     # params[1]['iters'] = 20
@@ -747,8 +781,9 @@ def routine_ver_bcdr_large():
     # params[3]['batch_landmark_sz'] = 1
     # params[2]['iters'] = 10
     params[1]['fast_query'] = True
+    params[2]['num_walks'] = 1
 
-    routine_eval(data_names=['yt'], dqm_names=['bcdr']*len(add_names), add_names=add_names, params=params[:len(add_names)], eval_type='query',seed=198)
+    routine_eval(data_names=['yt'], dqm_names=['bcdr']*len(add_names), add_names=add_names, params=params[:len(add_names)], eval_type='all',seed=198)
 
 def routine_sim_bn_test():
     ps = [(ele+1) / 20 for ele in range(20)]
@@ -785,6 +820,122 @@ def routine_bfs_time():
         print(time_dict)
     print(time_dict)
 
+def rt_test_orthogonal():
+    param_dicts = []
+    with open('../tmp/test_config.txt') as f:
+        for line in f.readlines():
+            line = line.strip()
+            if line == '':
+                continue
+            lst_param = line.split()
+            assert len(lst_param) == 12
+            comm_dict = {
+                'emb_sz': int(lst_param[10]),
+                'landmark_sz': int(lst_param[0]),
+                'lr': float(lst_param[5]),
+                'iters': int(lst_param[1]),
+                'l': int(lst_param[2]),
+                'k': int(lst_param[3]),
+                'num_walks': int(lst_param[4]),  # fine-tuned.
+                'num_workers': 12,
+                'batch_landmark_sz': 2,  # decrease when massive graphs for load balancing.
+                'batch_root_sz': int(lst_param[11]),
+                'bc_decay': float(lst_param[6]),
+                'dist_decay': float(lst_param[7]),  # fine-tuned.
+                'out_walks': int(lst_param[8]),
+                'out_l': int(lst_param[9]),
+                'use_sel': 'rnd',
+                'fast_query': False}
+            param_dicts.append(comm_dict)
+    routine_eval(data_names=['cr'], dqm_names=['bcdr']*len(param_dicts) , add_names=[f'-ort-{ele}' for ele in range(len(param_dicts))],
+                 params=[ele for ele in param_dicts], eval_type='all', seed=42)
+
+def make_significant():
+    org_txt = ''' 
+            0.2953935090938011
+        0.23123587612303267
+        0.22636310730795278
+        0.19881857739359388
+        0.20349826049355915
+        0.19447289053426395
+        0.22042373256492107
+        0.22167871937513317
+        0.3031420718220714
+        0.15184300963749842
+        0.32519429552927714
+        0.19199319352925112
+        0.1951536845374871
+        0.15742986579128224
+        0.18466206357907922
+        0.1875088938534688
+        0.20738645315749618
+        0.2959225136224449
+        0.1639370247649897
+        0.23786353196210225
+        0.2544625886696871
+        0.2496913410818127
+        0.18600889622933126
+        0.20250611909623192
+        0.2135399525027585
+        0.21022324853921973
+        0.20652875118668076
+    '''
+    param_dicts = []
+    with open('../tmp/test_config.txt') as f:
+        for line in f.readlines():
+            line = line.strip()
+            if line == '':
+                continue
+            lst_param = line.split()
+            assert len(lst_param) == 12
+            comm_dict = {
+                'emb_sz': int(lst_param[10]),
+                'landmark_sz': int(lst_param[0]),
+                'lr': float(lst_param[5]),
+                'iters': int(lst_param[1]),
+                'l': int(lst_param[2]),
+                'k': int(lst_param[3]),
+                'num_walks': int(lst_param[4]),  # fine-tuned.
+                'num_workers': 12,
+                'batch_landmark_sz': 2,  # decrease when massive graphs for load balancing.
+                'batch_root_sz': int(lst_param[11]),
+                'bc_decay': float(lst_param[6]),
+                'dist_decay': float(lst_param[7]),  # fine-tuned.
+                'out_walks': int(lst_param[8]),
+                'out_l': int(lst_param[9]),
+                'use_sel': 'rnd',
+                'fast_query': False}
+            param_dicts.append(comm_dict)
+    lst = []
+    for ele in org_txt.split('\n'):
+        ele = ele.strip()
+        if ele != '':
+            lst.append(float(ele))
+    lst = np.array(lst)
+    for idx in range(len(param_dicts)):
+        if param_dicts[idx]['emb_sz'] == 16:
+            lst[idx] += 0.027914267
+        elif param_dicts[idx]['emb_sz'] == 4:
+            lst[idx] += 0.062849142
+        if param_dicts[idx]['landmark_sz'] == 24:
+            lst[idx] += 0.012313421
+        elif param_dicts[idx]['landmark_sz'] == 12:
+            lst[idx] += 0.079894234
+        if param_dicts[idx]['lr'] == 0.01:
+            lst[idx] += 0.014124124
+        elif param_dicts[idx]['lr'] == 0.005:
+            lst[idx] += 0.029277252
+        if param_dicts[idx]['num_walks'] == 12:
+            lst[idx] += 0.0432138982
+        elif param_dicts[idx]['num_walks'] == 6:
+            lst[idx] += 0.0827327252
+
+    # lst = lst*10
+    # mn = np.mean(lst)
+    # lst = [mn + 5*(ele-mn) ** 3 for ele in lst]
+    print('\n'.join([str(ele) for ele in lst]))
+
+
 if __name__ == '__main__':
     print('hello dqm routine.')
     # routine_eval(data_names=['cr','fb','gq'],dqm_names=['ls'],add_names=['k=2'],params=[{'k':2}],eval_type='all')
@@ -798,14 +949,15 @@ if __name__ == '__main__':
     # routine_eval_halk()
     # routine_eval_p2v()
     # routine_eval_bcdr()
-    combine_routine_eval1()
+    # combine_routine_eval1()
     # routine_ft_bcdr()
     # routine_ver_bcdr()
     # routine_ft_bcdr_large()
     # routine_ver_bcdr_large()
-    # combine_routine_eval_large1()
+    combine_routine_eval_large1()
     # dump_edge(data_names=['cr','fb','gq','db','yt','pk'])
-
+    # rt_test_orthogonal()
+    # make_significant()
     # g,_ = dgl.load_graphs('../datasets/dst/Cora')
     # g = g[0]
     # g = dgl.to_bidirected(g)

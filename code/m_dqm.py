@@ -1471,13 +1471,13 @@ class DADL(DistanceQueryModel):
         with open(self.pwd() + '.pkl', 'wb') as f:
             pk.dump(self.embs, f)
             pk.dump(self.model, f)
-            pk.dump(self.nx_g,f)
+            # pk.dump(self.nx_g,f)
 
     def _load_param_pickle(self):
         with open(self.pwd() + '.pkl', 'rb') as f:
             self.embs = pk.load(f)
             self.model = pk.load(f)
-            self.nx_g = pk.load(f)
+            # self.nx_g = pk.load(f)
 
     def _load_param(self):
         with open(self.pwd() + '.json', 'r') as f:
@@ -1711,13 +1711,13 @@ class HALK(DistanceQueryModel):
         with open(self.pwd() + '.pkl', 'wb') as f:
             pk.dump(self.embs, f)
             pk.dump(self.model, f)
-            pk.dump(self.nx_g,f)
+            # pk.dump(self.nx_g,f)
 
     def _load_param_pickle(self):
         with open(self.pwd() + '.pkl', 'rb') as f:
             self.embs = pk.load(f)
             self.model = pk.load(f)
-            self.nx_g = pk.load(f)
+            # self.nx_g = pk.load(f)
 
     def _load_param(self):
         with open(self.pwd() + '.json', 'r') as f:
@@ -2171,13 +2171,13 @@ class Path2Vec(DistanceQueryModel):
         with open(self.pwd() + '.pkl', 'wb') as f:
             pk.dump(self.embs, f)
             pk.dump(self.model, f)
-            pk.dump(self.nx_g,f)
+            # pk.dump(self.nx_g,f)
 
     def _load_param_pickle(self):
         with open(self.pwd() + '.pkl', 'rb') as f:
             self.embs = pk.load(f)
             self.model = pk.load(f)
-            self.nx_g = pk.load(f)
+            # self.nx_g = pk.load(f)
 
     def _load_param(self):
         with open(self.pwd() + '.json', 'r') as f:
