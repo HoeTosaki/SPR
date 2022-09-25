@@ -129,6 +129,138 @@ class DistOfflineEval(DistanceQueryEval):
             'storage': total_storage,
         }
 
+class BNTestManager:
+    def __init__(self,cache_name='../log/BNTest.cache'):
+        self.data_dict = {}
+        self.cache_name = cache_name
+        # nid - pid - {g_sz,pll_ind,pll_qry,bc_ind,bc_qry}
+        if os.path.exists(cache_name):
+            self.pull_log()
+            print(f'load cache file, and data_dict len = {len(self.data_dict)}')
+        else:
+            print('cache file not found, refresh.')
+            self.push_log()
+
+    def add_log(self,nid,pid,g_sz=None,pll_ind=None,pll_qry=None,bc_ind=None,bc_qry=None):
+        if nid not in self.data_dict:
+            self.data_dict[nid] = {}
+
+        if pid not in self.data_dict[nid]:
+            self.data_dict[nid][pid] = {}
+
+        cur_dict = self.data_dict[nid][pid]
+        if g_sz is not None:
+            cur_dict['g_sz'] = g_sz
+
+        if pll_ind is not None:
+            cur_dict['pll_ind'] = pll_ind
+
+        if pll_qry is not None:
+            cur_dict['pll_qry'] = pll_qry
+
+        if bc_ind is not None:
+            cur_dict['bc_ind'] = bc_ind
+
+        if bc_qry is not None:
+            cur_dict['bc_qry'] = bc_qry
+
+    def push_log(self):
+        with open(self.cache_name,'wb') as f:
+            pk.dump(self.data_dict,f)
+
+    def pull_log(self):
+        with open(self.cache_name,'rb') as f:
+            self.data_dict = pk.load(f)
+
+    def auto_add_g_sz(self,print_detail=False):
+        self.pull_log()
+        add_cnt = 0
+        for home,dirs,files in os.walk('../tmp/'):
+            for file in files:
+                if file.endswith('.edgelist'):
+                    g_sz = os.stat(os.path.join(home,file)).st_size/64/1024/1024
+                    lst = file[:-len('.edgelist')].split('_')
+                    self.add_log(nid=str(lst[4]),pid=str(lst[2]),g_sz=str(g_sz))
+                    add_cnt += 1
+                    if print_detail:
+                        print(f'[nid={lst[4]} pid={lst[2]}] add g_sz={g_sz}')
+        print(f'[auto-add g_sz]find total record:{add_cnt}')
+        self.push_log()
+
+    def auto_add_pll_ind(self,print_detail=False):
+        self.pull_log()
+        add_cnt = 0
+        for home,dirs,files in os.walk('../tmp/'):
+            for file in files:
+                if file.endswith('.edgelist.ind'):
+                    pll_ind = os.stat(os.path.join(home,file)).st_size/1024/1024
+                    lst = file[:-len('.edgelist.ind')].split('_')
+                    self.add_log(nid=str(lst[4]),pid=str(lst[2]),pll_ind=str(pll_ind))
+                    add_cnt += 1
+                    if print_detail:
+                        print(f'[nid={lst[4]} pid={lst[2]}] add pll_ind={pll_ind}')
+        print(f'[auto-add pll_ind]find total record:{add_cnt}')
+        self.push_log()
+
+    def auto_add_pll_qry(self,print_detail=False):
+        self.pull_log()
+        add_cnt = 0
+        for home,dirs,files in os.walk('../tmp/'):
+            for file in files:
+                if file.endswith('.edgelist.query.txt'):
+                    with open(os.path.join(home,file), 'r') as f:
+                        pll_qry = float(f.readline())*1000
+                    lst = file[:-len('.edgelist.query.txt')].split('_')
+                    self.add_log(nid=str(lst[4]),pid=str(lst[2]),pll_qry=str(pll_qry))
+                    add_cnt += 1
+                    if print_detail:
+                        print(f'[nid={lst[4]} pid={lst[2]}] add pll_qry={pll_qry}')
+        print(f'[auto-add pll_qry]find total record:{add_cnt}')
+        self.push_log()
+
+    def auto_add_bc_ind(self,print_detail=False):
+        self.pull_log()
+        add_cnt = 0
+        for home,dirs,files in os.walk('../log/'):
+            for file in files:
+                if file.startswith('bn_emb_'): # bn_emb_nsz_{}_psz_{}.log
+                    bc_ind = os.stat(os.path.join(home, file)).st_size / 1024 / 1024
+                    lst = file[:-len('.log')].split('_')
+                    self.add_log(nid=str(lst[3]),pid=str(lst[5]),bc_ind=str(bc_ind))
+                    add_cnt += 1
+                    if print_detail:
+                        print(f'[nid={lst[3]} pid={lst[5]}] add bc_ind={bc_ind}')
+        print(f'[auto-add bc_ind]find total record:{add_cnt}')
+        self.push_log()
+
+    def auto_add_bc_qry(self,print_detail=False):
+        self.pull_log()
+        if not os.path.exists('../log/bn_bcdr_query.log'):
+            print('[auto-add bc_qry] not found file.')
+            return
+
+        with open('../log/bn_bcdr_query.log', 'rb') as f:
+            bc_qry = pk.load(f)
+            nids = pk.load(f)
+            pids = pk.load(f)
+        bc_qry = np.array(bc_qry) * 1000
+        add_cnt = 0
+        for idx,nid in enumerate(nids):
+            for idy,pid in enumerate(pids):
+                self.add_log(nid=str(nid),pid=str(pid),bc_qry=str(bc_qry[idx][idy]))
+                if print_detail:
+                    print(f'[nid={nid} pid={pid}] add bc_qry={bc_qry[nid][pid]}')
+                add_cnt += 1
+        print(f'[auto-add bc_qry]find total record:{add_cnt}')
+        self.push_log()
+
+    def print_stat(self,print_detail=False):
+        self.pull_log()
+        print(self.data_dict)
+
+    def query_meta(self,nid=None,pid=None):
+        return self.data_dict[str(nid)][str(pid)]
+
 def _th_gen_bn_graph(node_seq,p,node_sz,**kwargs):
     ret_lst = []
     for nid in node_seq:
@@ -139,12 +271,21 @@ def _th_gen_bn_graph(node_seq,p,node_sz,**kwargs):
     return ret_lst
 
 def gen_bn_graph(graph_name,node_sz,p=0.5,num_workers=8):
-    mpm = utils.MPManager(batch_sz=max(min(2048,node_sz),int(node_sz//64)), num_workers=num_workers, use_shuffle=False)
-    ret_dict = mpm.multi_proc(_th_gen_bn_graph, [list(range(node_sz))], p=p,node_sz=node_sz, auto_concat=False)
-    with open(f'../tmp/{graph_name}.edgelist','w') as f:
-        for k,v in ret_dict.items():
-            f.writelines(v)
+    batch_gen_node = max(min(2048,node_sz),int(node_sz//64))
+    batch_wrt_node = batch_gen_node * num_workers
+    all_node_list = list(range(node_sz))
+    cur_wrt_pnt = 0
+    mpm = utils.MPManager(batch_sz=batch_gen_node, num_workers=num_workers, use_shuffle=False)
+    if os.path.exists(f'../tmp/{graph_name}.edgelist'):
+        print(f'found processed graph file {graph_name}')
+        return
+    while cur_wrt_pnt < len(all_node_list):
+        ret_dict = mpm.multi_proc(_th_gen_bn_graph, [all_node_list[cur_wrt_pnt:min(len(all_node_list),cur_wrt_pnt+batch_wrt_node)]], p=p, node_sz=node_sz, auto_concat=False)
+        with open(f'../tmp/{graph_name}.edgelist', 'a') as f:
+            for k, v in ret_dict.items():
+                f.writelines(v)
             f.flush()
+        cur_wrt_pnt += batch_wrt_node
 
 def gen_fake_emb_query(node_szs,ps,query_sz=1000000):
     lsts = []
@@ -167,13 +308,19 @@ def gen_fake_emb_query(node_szs,ps,query_sz=1000000):
         lsts.append(cur_lst)
     with open('../log/bn_bcdr_query.log','wb') as f:
         pk.dump(lsts,f)
+        pk.dump(node_szs,f)
+        pk.dump(ps,f)
 
-def gen_fake_bcdr(node_szs):
+def gen_fake_bcdr(node_szs,ps=None):
     for node_sz in node_szs:
         embs = tc.from_numpy(np.random.random(size=(node_sz,16)))
-        with open(f'../log/bngraph/bn_emb_nsz_{node_sz}.log','wb') as f:
-            pk.dump(embs,f)
-
+        if ps is None:
+            with open(f'../log/bngraph/bn_emb_nsz_{node_sz}.log','wb') as f:
+                pk.dump(embs,f)
+        else:
+            for p in ps:
+                with open(f'../log/bn_emb_nsz_{node_sz}_psz_{p}.log', 'wb') as f:
+                    pk.dump(embs, f)
 
 glb_node_max=12
 def eval_bn_storage():
@@ -269,15 +416,115 @@ def eval_bn_query():
     plt.savefig('../fig/bn_query.pdf')
     plt.show()
 
+glb_node_max=14
+def eval_bn_storage1():
+    bntm = BNTestManager()
+    ps = [(ele + 1) / 20 for ele in range(20)]
+    node_szs = [int(math.pow(2, ele + 1)) for ele in range(glb_node_max)]
+    s_graph = []
+    s_ind = []
+    s_emb = []
+    for node_sz in node_szs:
+        cur_s_graph = []
+        cur_s_ind = []
+        cur_emb = []
+        for p in ps:
+            cur_s_graph.append(float(bntm.query_meta(nid=node_sz,pid=p)['g_sz']))
+            cur_s_ind.append(float(bntm.query_meta(nid=node_sz,pid=p)['pll_ind']))
+            cur_emb.append(float(bntm.query_meta(nid=node_sz,pid=p)['bc_ind']))
+        s_graph.append(cur_s_graph)
+        s_ind.append(cur_s_ind)
+        s_emb.append(cur_emb)
+
+    fig = plt.figure(figsize=(8,8))
+
+    ax = fig.add_subplot(projection='3d')
+
+
+    x = np.array(ps)
+    y = np.array([ele+1 for ele in range(glb_node_max)])
+    x,y = np.meshgrid(x,y)
+    z1 = np.array(s_graph)
+    z2 = np.array(s_ind)
+    z3 = np.array(s_emb)
+
+    # c: 颜色
+    # ‘b’ blue 蓝色、g’ green 绿色、‘r’ red 红色、‘c’ cyan 兰青色
+    # ‘m’ magenta 紫色、‘y’ yellow 黄色、‘k’ black 黑色、‘w’white 白色
+    ax.plot_wireframe(x, y, z1, color='k',label='graph size')
+    ax.plot_wireframe(x, y, z2, color='coral',label='exact representation')
+    ax.plot_wireframe(x, y, z3, color='dodgerblue',label='approximate representation')
+
+    ax.set_xlabel('p',fontsize=20)
+    ax.set_ylabel('log |V|',fontsize=20)
+    ax.set_zlabel('storage cost (MB)',fontsize=20)
+
+    plt.legend(fontsize=20)
+    plt.tight_layout()
+    plt.gcf().subplots_adjust(right=0.95)
+    plt.savefig('../fig/bn_storage.pdf')
+    plt.show()
+
+def eval_bn_query1():
+    bntm = BNTestManager()
+    ps = [(ele + 1) / 20 for ele in range(20)]
+    node_szs = [int(math.pow(2, ele + 1)) for ele in range(glb_node_max)]
+    q_ind = []
+    q_emb = []
+    for node_sz in node_szs:
+        cur_q_ind = []
+        cur_q_emb = []
+        for p in ps:
+            cur_q_ind.append(float(bntm.query_meta(nid=node_sz,pid=p)['pll_qry']))
+            cur_q_emb.append(float(bntm.query_meta(nid=node_sz,pid=p)['bc_qry']))
+        q_ind.append(cur_q_ind)
+        q_emb.append(cur_q_emb)
+    fig = plt.figure(figsize=(8,8))
+
+    ax = fig.add_subplot(projection='3d')
+    x = np.array(ps)
+    y = np.array([ele+1 for ele in range(glb_node_max)])
+    x,y = np.meshgrid(x,y)
+    z1 = np.array(q_ind)
+    z2 = np.array(q_emb)
+
+    # c: 颜色
+    # ‘b’ blue 蓝色、g’ green 绿色、‘r’ red 红色、‘c’ cyan 兰青色
+    # ‘m’ magenta 紫色、‘y’ yellow 黄色、‘k’ black 黑色、‘w’white 白色
+    ax.plot_wireframe(x, y, z1, color='coral',label='exact representation')
+    ax.plot_wireframe(x, y, z2, color='dodgerblue',label='approximate representation')
+
+    ax.set_xlabel('p',fontsize=20)
+    ax.set_ylabel('log |V|',fontsize=20)
+    ax.set_zlabel('response time (ns)',fontsize=20)
+
+    plt.legend(fontsize=20)
+    plt.tight_layout()
+    plt.gcf().subplots_adjust(right=0.95)
+    plt.savefig('../fig/bn_query.pdf')
+    plt.show()
+
 
 if __name__ == '__main__':
     # a = np.random.random(size=(10,)) < 0.5
     # print(a)
     # print(a[1]==False)
-    eval_bn_storage()
-    eval_bn_query()
+    # eval_bn_storage()
+    # eval_bn_query()
 
+    # eval_bn_storage1()
+    # eval_bn_query1()
 
+    # bntm = BNTestManager()
+    #
+    # bntm.auto_add_g_sz()
+    # bntm.auto_add_bc_ind()
+    # bntm.auto_add_bc_qry()
+    # bntm.auto_add_pll_qry()
+    # bntm.auto_add_pll_ind()
+    #
+    # bntm.print_stat()
 
+    pass
 
 

@@ -83,6 +83,8 @@ def routine_eval(data_names=['cr'],dqm_names=['ado'],add_names=[None],params=[{}
                 dqm = m_dqm.HALK(**cur_param)
             elif dqm_name == 'p2v':
                 dqm = m_dqm.Path2Vec(**cur_param)
+            elif dqm_name == 'cb':
+                dqm = m_dqm.CatBoost(**cur_param)
             elif dqm_name == 'bcdr':
                 dqm = m_dqm.BCDR(**cur_param)
             assert dqm is not None, print('dqm_name', dqm_name)
@@ -273,6 +275,22 @@ def routine_eval_p2v():
     routine_eval(data_names=['cr'], dqm_names=['p2v'], add_names=add_names, params=params, eval_type='all')
     # routine_eval(data_names=['cr','fb','gq'], dqm_names=['dadl'], add_names=add_names, params=params, eval_type='all')
 
+def routine_eval_cb():
+    comm_dict = {
+        'landmark_sz':16,
+        'batch_landmark_sz':2,
+        'num_workers':8,
+        'train_ratio':0.02,
+    }
+
+    add_names = ['default']
+    params = [comm_dict]
+    # routine_eval(data_names=['fb'], dqm_names=['cb'], add_names=add_names, params=params, eval_type='all')
+    # routine_eval(data_names=['cr','fb','gq'], dqm_names=['cb'], add_names=add_names, params=params, eval_type='all')
+    # routine_eval(data_names=['db','yt'], dqm_names=['cb'], add_names=add_names, params=params, eval_type='all')
+    # routine_eval(data_names=['cr','fb','gq'], dqm_names=['cb'], add_names=add_names, params=params, eval_type='all')
+    routine_eval(data_names=['db']*5+['yt']*3, dqm_names=['cb'], add_names=add_names, params=params, eval_type='all')
+
 
 def routine_eval_bcdr():
     comm_dict = {
@@ -298,6 +316,64 @@ def routine_eval_bcdr():
     add_names = ['default']
     params = [comm_dict]
     routine_eval(data_names=['cr','fb','gq'], dqm_names=['bcdr'], add_names=add_names, params=params, eval_type='all')
+
+def routine_eval_bcdr_plus():
+    comm_dict = {
+        'emb_sz': 16,
+        'landmark_sz': 80,
+        'lr': 0.01,
+        'iters': 15,
+        'l': 40,
+        'k': 1,
+        'num_walks': 20,  # fine-tuned.
+        'num_workers': 12,
+        'batch_landmark_sz': 10,  # decrease when massive graphs for load balancing.
+        'batch_root_sz': 100,
+        'bc_decay': 10,
+        'dist_decay': 0.35,  # fine-tuned.
+        'out_walks': 40,
+        'out_l': 10,
+        'use_sel': 'rnd',
+        'fast_query': False,
+        'is_catboost':True,
+        'catboost_comb':True,
+        'elim_bc': False,
+        'landmark_sz_for_catboost': 16,
+    }
+
+
+    add_names = ['plus']
+    params = [comm_dict]
+    routine_eval(data_names=['cr','fb','gq'], dqm_names=['bcdr'], add_names=add_names, params=params, eval_type='all')
+
+def routine_eval_bcdr_plus_large():
+    comm_dict = {
+        'emb_sz': 16,
+        'landmark_sz': 5,
+        'lr': 0.01,
+        'iters': 15,
+        'l': 40,
+        'k': 1,
+        'num_walks': 2,  # fine-tuned.
+        'num_workers': 12,
+        'batch_landmark_sz': 1,  # decrease when massive graphs for load balancing.
+        'batch_root_sz': 30000,
+        'bc_decay': 1,
+        'dist_decay': 0.35,  # fine-tuned.
+        'out_walks': 80,
+        'out_l': 5,
+        'use_sel': 'rnd',
+        'fast_query': False,
+        'is_catboost':True,
+        'catboost_comb':True,
+        'elim_bc': False,
+        'landmark_sz_for_catboost':16,
+    }
+
+    add_names = ['plus']
+    params = [comm_dict]
+    routine_eval(data_names=['yt'], dqm_names=['bcdr'], add_names=add_names, params=params, eval_type='all')
+    # routine_eval(data_names=['yt'], dqm_names=['bcdr'], add_names=add_names, params=params, eval_type='all')
 
 def combine_routine_eval1():
     hyper_dict = {}
@@ -787,7 +863,17 @@ def routine_ver_bcdr_large():
 
 def routine_sim_bn_test():
     ps = [(ele+1) / 20 for ele in range(20)]
-    node_szs = [int(math.pow(2,ele+1)) for ele in range(14,20)]
+    node_szs = [int(math.pow(2,ele+1)) for ele in range(20)]
+    for idx,node_sz in enumerate(node_szs):
+        for idy,p in enumerate(ps):
+            print(f'computing p={p},node_sz={node_sz}...')
+            m_dqm_eval.gen_bn_graph(f'bn_p_{p}_nsz_{node_sz}',node_sz=node_sz,p=p,num_workers=10)
+
+def routine_sim_bn_test2d():
+    # ps = [0.05,0.2,0.6]
+    ps = [0.05, 0.2]
+    # node_szs = [int(math.pow(2,ele+1)) for ele in range(15,20)]
+    node_szs = [int(math.pow(2,ele+1)) for ele in range(16,20)]
     for idx,node_sz in enumerate(node_szs):
         for idy,p in enumerate(ps):
             print(f'computing p={p},node_sz={node_sz}...')
@@ -948,13 +1034,18 @@ if __name__ == '__main__':
     # routine_eval_dadl()
     # routine_eval_halk()
     # routine_eval_p2v()
+    # routine_eval_cb()
     # routine_eval_bcdr()
     # combine_routine_eval1()
     # routine_ft_bcdr()
     # routine_ver_bcdr()
     # routine_ft_bcdr_large()
     # routine_ver_bcdr_large()
-    combine_routine_eval_large1()
+    # combine_routine_eval_large1()
+
+    # routine_eval_bcdr_plus()
+    # routine_eval_bcdr_plus_large()
+
     # dump_edge(data_names=['cr','fb','gq','db','yt','pk'])
     # rt_test_orthogonal()
     # make_significant()
@@ -965,7 +1056,7 @@ if __name__ == '__main__':
     # bfs = m_generator.BFS(g)
     # print(bfs.dist_between(29,84))
 
-    # routine_sim_bn_test()
+    routine_sim_bn_test2d()
     # m_dqm_eval.gen_fake_emb_query(node_szs=[int(math.pow(2,ele+1)) for ele in range(0,20)],ps=[(ele+1) / 20 for ele in range(20)])
-    # m_dqm_eval.gen_fake_bcdr(node_szs=[int(math.pow(2,ele+1)) for ele in range(0,20)])
+    # m_dqm_eval.gen_fake_bcdr(node_szs=[int(math.pow(2,ele+1)) for ele in range(0,20)],ps=[(ele+1) / 20 for ele in range(20)])
     # routine_bfs_time()

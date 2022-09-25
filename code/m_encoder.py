@@ -12,7 +12,7 @@ import torch as tc
 import networkx as nx
 import numpy as np
 import gensim as gs
-import karateclub
+# import karateclub
 
 from sklearn.decomposition import PCA
 class Encoder:
