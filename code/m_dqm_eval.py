@@ -273,21 +273,26 @@ def _th_gen_bn_graph(node_seq,p,node_sz,**kwargs):
     return ret_lst
 
 def gen_bn_graph(graph_name,node_sz,p=0.5,num_workers=8):
-    batch_gen_node = max(min(2048,node_sz),int(node_sz//64))
+    # batch_gen_node = max(min(2048,node_sz),int(node_sz//64))
+    batch_gen_node = 512
     batch_wrt_node = batch_gen_node * num_workers
     all_node_list = list(range(node_sz))
+    max_cnt = len(all_node_list) / batch_wrt_node
+    cur_cnt = 0
     cur_wrt_pnt = 0
     mpm = utils.MPManager(batch_sz=batch_gen_node, num_workers=num_workers, use_shuffle=False)
     if os.path.exists(f'../tmp/{graph_name}.edgelist'):
         print(f'found processed graph file {graph_name}')
         return
     while cur_wrt_pnt < len(all_node_list):
+        print(f'start for {cur_cnt}/{max_cnt}.')
         ret_dict = mpm.multi_proc(_th_gen_bn_graph, [all_node_list[cur_wrt_pnt:min(len(all_node_list),cur_wrt_pnt+batch_wrt_node)]], p=p, node_sz=node_sz, auto_concat=False)
         with open(f'../tmp/{graph_name}.edgelist', 'a') as f:
             for k, v in ret_dict.items():
                 f.writelines(v)
             f.flush()
         cur_wrt_pnt += batch_wrt_node
+        cur_cnt += 1
 
 def gen_fake_emb_query(node_szs,ps,query_sz=1000000):
     lsts = []
@@ -581,15 +586,15 @@ if __name__ == '__main__':
     # eval_bn_storage1()
     # eval_bn_query1()
 
-    # bntm = BNTestManager()
-    #
-    # bntm.auto_add_g_sz()
-    # bntm.auto_add_bc_ind()
-    # bntm.auto_add_bc_qry()
-    # bntm.auto_add_pll_qry()
-    # bntm.auto_add_pll_ind()
-    #
-    # bntm.print_stat()
+    bntm = BNTestManager()
+
+    bntm.auto_add_g_sz()
+    bntm.auto_add_bc_ind()
+    bntm.auto_add_bc_qry()
+    bntm.auto_add_pll_qry()
+    bntm.auto_add_pll_ind()
+
+    bntm.print_stat()
 
     pass
 
