@@ -13,6 +13,8 @@ import sys
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 
+glb_cs = ['coral', 'dodgerblue', 'darkcyan', 'darkviolet', 'olive', 'cyan', 'black', 'firebrick',
+              'gainsboro']
 
 class DistanceQueryEval:
     def __init__(self,nx_g=None,dqms=None,generator=None,eval_name='dq-eval',tmp_dir='../log',force=False,seed=None):
@@ -504,6 +506,68 @@ def eval_bn_query1():
     plt.savefig('../fig/bn_query.pdf')
     plt.show()
 
+def eval_bn_storage_fixed_p(ps = [0.05,0.2],ns=[1,12]):
+    bntm = BNTestManager()
+    node_szs = [int(math.pow(2, ele)) for ele in range(*ns)]
+    s_graph = []
+    s_ind = []
+    s_emb = []
+    for p in ps:
+        cur_s_graph = []
+        cur_s_ind = []
+        cur_emb = []
+        for node_sz in node_szs:
+            cur_s_graph.append(float(bntm.query_meta(nid=node_sz,pid=p)['g_sz']))
+            cur_s_ind.append(float(bntm.query_meta(nid=node_sz,pid=p)['pll_ind']))
+            cur_emb.append(float(bntm.query_meta(nid=node_sz,pid=p)['bc_ind']))
+        s_graph.append(cur_s_graph)
+        s_ind.append(cur_s_ind)
+        s_emb.append(cur_emb)
+
+    plt.figure(figsize=(8,8))
+    lss = ['-',':','-.']
+    for idx,(p,ls) in enumerate(zip(ps,lss)):
+        plt.plot(range(*ns),s_graph[idx],color='k',linestyle=ls,marker='o',label=f'p={p}, graph size')
+        plt.plot(range(*ns),s_ind[idx],color='coral',linestyle=ls,label=f'p={p}, exact representation')
+        plt.plot(range(*ns),s_emb[idx],color='dodgerblue',linestyle=ls,label=f'p={p}, approximate representation')
+
+    plt.xlabel('log |V|',fontsize=20)
+    plt.ylabel('storage cost (MB)',fontsize=20)
+    plt.legend(fontsize=20)
+    plt.tight_layout()
+    plt.gcf().subplots_adjust(right=0.95)
+    plt.savefig('../fig/bn_storage_fixed_p.pdf')
+    plt.show()
+
+def eval_bn_query_fixed_p(ps = [0.05,0.2],ns=[1,12]):
+    bntm = BNTestManager()
+    node_szs = [int(math.pow(2, ele)) for ele in range(*ns)]
+    q_ind = []
+    q_emb = []
+    for p in ps:
+        cur_q_ind = []
+        cur_q_emb = []
+        for node_sz in node_szs:
+            cur_q_ind.append(float(bntm.query_meta(nid=node_sz,pid=p)['pll_qry']))
+            cur_q_emb.append(float(bntm.query_meta(nid=node_sz,pid=p)['bc_qry']))
+        q_ind.append(cur_q_ind)
+        q_emb.append(cur_q_emb)
+
+    plt.figure(figsize=(8,8))
+    lss = ['-',':','-.']
+    for idx,(p,ls) in enumerate(zip(ps,lss)):
+        plt.plot(range(*ns),q_ind[idx],color='coral',linestyle=ls,label=f'p={p}, exact representation')
+        plt.plot(range(*ns),q_emb[idx],color='dodgerblue',linestyle=ls,label=f'p={p}, approximate representation')
+
+    plt.xlabel('log |V|',fontsize=20)
+    plt.ylabel('response time (ns)',fontsize=20)
+
+    plt.legend(fontsize=20)
+    plt.tight_layout()
+    plt.gcf().subplots_adjust(right=0.95)
+    plt.savefig('../fig/bn_query_fixed_p.pdf')
+    plt.show()
+
 
 if __name__ == '__main__':
     # a = np.random.random(size=(10,)) < 0.5
@@ -512,6 +576,8 @@ if __name__ == '__main__':
     # eval_bn_storage()
     # eval_bn_query()
 
+    # eval_bn_storage_fixed_p(ps=[0.05])
+    eval_bn_query_fixed_p(ps = [0.05],ns=[1,15])
     # eval_bn_storage1()
     # eval_bn_query1()
 

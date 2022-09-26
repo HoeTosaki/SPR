@@ -1056,7 +1056,7 @@ if __name__ == '__main__':
     # bfs = m_generator.BFS(g)
     # print(bfs.dist_between(29,84))
 
-    routine_sim_bn_test2d()
+    # routine_sim_bn_test2d()
     # m_dqm_eval.gen_fake_emb_query(node_szs=[int(math.pow(2,ele+1)) for ele in range(0,20)],ps=[(ele+1) / 20 for ele in range(20)])
     # m_dqm_eval.gen_fake_bcdr(node_szs=[int(math.pow(2,ele+1)) for ele in range(0,20)],ps=[(ele+1) / 20 for ele in range(20)])
     # routine_bfs_time()
