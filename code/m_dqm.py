@@ -2422,7 +2422,7 @@ class DistDecoder_BCDR(nn.Module):
         return out
 
 class BCDR(DistanceQueryModel):
-    def __init__(self,emb_sz=16,landmark_sz=100,lr=0.01,iters=15,l=80,num_walks=10,num_workers=8,batch_landmark_sz=5,batch_root_sz=20,bc_decay=10,dist_decay=0.98,out_walks=40,out_l=10,use_sel='rnd',fast_query=False,is_catboost=False,catboost_comb=False,elim_bc=False,landmark_sz_for_catboost=16,**kwargs):
+    def __init__(self,emb_sz=16,landmark_sz=100,lr=0.01,iters=15,l=80,num_walks=10,num_workers=8,batch_landmark_sz=5,batch_root_sz=20,bc_decay=10,dist_decay=0.98,out_walks=40,out_l=10,use_sel='rnd',fast_query=False,is_catboost=False,catboost_comb=False,elim_bc=False,landmark_sz_for_catboost=16,use_rep_bc=True,use_rep_dr=True,**kwargs):
         super(BCDR, self).__init__(**kwargs)
         self.emb_sz = emb_sz
         self.landmark_sz = landmark_sz
@@ -2443,6 +2443,8 @@ class BCDR(DistanceQueryModel):
         self.catboost_comb = catboost_comb
         self.elim_bc = elim_bc
         self.landmark_sz_for_catboost = landmark_sz_for_catboost
+        self.use_rep_bc = use_rep_bc
+        self.use_rep_dr = use_rep_dr
         # self.storage_lst = [self.pwd() + '.json', self.pwd() + '.embs.npy',self.pwd()+'.model']
         self.storage_lst = [self.pwd() + '.pkl']
 
@@ -2486,7 +2488,7 @@ class BCDR(DistanceQueryModel):
         return train_pairs_bc,bcs,train_pairs_cb
 
     @staticmethod
-    def _s_gen_bc_walk(roots,nx_g,num_walks,l,bcs,bc_decay,out_walks,out_l,dist_decay, **kwargs):
+    def _s_gen_bc_walk(roots,nx_g,num_walks,l,bcs,bc_decay,out_walks,out_l,dist_decay,use_rep_bc,use_rep_dr, **kwargs):
         # nx_g = nx.Graph()
         # pid = kwargs['__PID__']
         total_walks = []
@@ -2512,9 +2514,12 @@ class BCDR(DistanceQueryModel):
                     l_cur_cands = len(cur_cands)
                     # update next nid.
                     if  l_cur_cands >= 2:
-                        cur_probs = np.array(cur_probs)
-                        cur_probs /= np.sum(cur_probs)
-                        cur_nid = int(np.random.choice(a=cur_cands,size=1,p=cur_probs)[0])
+                        if use_rep_bc:
+                            cur_probs = np.array(cur_probs)
+                            cur_probs /= np.sum(cur_probs)
+                            cur_nid = int(np.random.choice(a=cur_cands,size=1,p=cur_probs)[0])
+                        else:
+                            cur_nid = int(np.random.choice(a=cur_cands, size=1, p=None)[0])
                     elif l_cur_cands == 1:
                         cur_nid = cur_cands[0]
                     else:
@@ -2525,9 +2530,12 @@ class BCDR(DistanceQueryModel):
                     cur_l += 1
             dist_map.pop(root)
             total_cands = list(dist_map.keys())
-            total_probs = np.power(dist_decay,np.array(list(dist_map.values()))) * bcs[total_cands]
-            total_probs /= np.sum(total_probs)
-            walks = np.random.choice(a=total_cands, size=(out_walks, out_l), replace=True,p=total_probs) # TODO:replace is False?
+            if use_rep_dr:
+                total_probs = np.power(dist_decay,np.array(list(dist_map.values()))) * bcs[total_cands]
+                total_probs /= np.sum(total_probs)
+                walks = np.random.choice(a=total_cands, size=(out_walks, out_l), replace=True,p=total_probs) # TODO:replace is False?
+            else:
+                walks = np.random.choice(a=total_cands, size=(out_walks, out_l), replace=True, p=None)
             root_cols = np.array([root] * out_walks).reshape(-1,1)
             walks = np.concatenate([root_cols,walks],axis=1)
             total_walks.append(walks)
@@ -2550,7 +2558,7 @@ class BCDR(DistanceQueryModel):
 
             # landmarks = np.argsort([deg_dict[nid] for nid in range(n)])[-self.landmark_sz:] # since nid just == idx.
             landmarks = np.argsort([deg_dict[nid] for nid in range(n)])[-self.landmark_sz_for_catboost:]  # since nid just == idx.
-
+            landmarks = nodes[:self.landmark_sz_for_catboost]
             # landmarks = np.array(nodes)[idx_deg]
             # landmarks = sorted([deg_dict[nid] for nid in range(n)],reverse=True)[:self.landmark_sz]
         else:
@@ -2570,7 +2578,7 @@ class BCDR(DistanceQueryModel):
             # run bc random walk tree.
             mpm = utils.MPManager(batch_sz=self.batch_root_sz, num_workers=self.num_workers, use_shuffle=False)
             random.shuffle(nodes)
-            ret_dict = mpm.multi_proc(BCDR._s_gen_bc_walk,[nodes],nx_g=self.nx_g,num_walks=self.num_walks,l=self.l,bcs=bcs,bc_decay=self.bc_decay,out_walks=self.out_walks,out_l=self.out_l,dist_decay=self.dist_decay,auto_concat=False)
+            ret_dict = mpm.multi_proc(BCDR._s_gen_bc_walk,[nodes],nx_g=self.nx_g,num_walks=self.num_walks,l=self.l,bcs=bcs,bc_decay=self.bc_decay,out_walks=self.out_walks,out_l=self.out_l,dist_decay=self.dist_decay,use_rep_bc=self.use_rep_bc,use_rep_dr=self.use_rep_dr,auto_concat=False)
             walks = []
             [walks.append(ele) for ele in ret_dict.values()]
             walks = np.concatenate(walks,axis=0)
@@ -2594,10 +2602,16 @@ class BCDR(DistanceQueryModel):
             low_embs = np.zeros(shape=(self.nx_g.number_of_nodes(), 16))
             lid2cid = {}
             train_pairs_cb.extend(train_pairs_bc)
-            for idx, (lid,is_bc_use) in enumerate(landmarks):
+            for idx, (lid,is_bc_use) in enumerate(landmarks[:low_embs.shape[1]]): # use the dim of low emb, might be uncorresponded with landmark_sz
                 lid2cid[lid] = idx
-            for lid, nid, dist in train_pairs_cb:
-                low_embs[nid, lid2cid[lid]] = dist
+            if self.landmark_sz > 16:
+                # need sel a subset of landmarks at size=16.
+                for lid, nid, dist in train_pairs_cb:
+                    if lid in lid2cid:
+                        low_embs[nid, lid2cid[lid]] = dist
+            else:
+                for lid, nid, dist in train_pairs_cb:
+                    low_embs[nid, lid2cid[lid]] = dist
             low_embs = tc.FloatTensor(low_embs)
             # self.embs = tc.concat([self.embs,low_embs],dim=1)
             # self.embs = tc.concat([low_embs], dim=1)

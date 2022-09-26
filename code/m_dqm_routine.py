@@ -375,6 +375,85 @@ def routine_eval_bcdr_plus_large():
     routine_eval(data_names=['yt'], dqm_names=['bcdr'], add_names=add_names, params=params, eval_type='all')
     # routine_eval(data_names=['yt'], dqm_names=['bcdr'], add_names=add_names, params=params, eval_type='all')
 
+def routine_abla_bcdr_plus():
+    comm_dict = {
+        'emb_sz': 16,
+        'landmark_sz': 80,
+        'lr': 0.01,
+        'iters': 15,
+        'l': 40,
+        'k': 1,
+        'num_walks': 20,  # fine-tuned.
+        'num_workers': 12,
+        'batch_landmark_sz': 10,  # decrease when massive graphs for load balancing.
+        'batch_root_sz': 100,
+        'bc_decay': 10,
+        'dist_decay': 0.35,  # fine-tuned.
+        'out_walks': 40,
+        'out_l': 10,
+        'use_sel': 'rnd',
+        'fast_query': False,
+        'is_catboost': True,
+        'catboost_comb': True,
+        'elim_bc': False,
+        'landmark_sz_for_catboost': 80,
+        'use_rep_bc':True,
+        'use_rep_dr':True,
+    }
+
+    add_names = ['default','rm_db_chk','rm_glb_feat','rm_loc_feat','rm_bc','rm_dr','sel_by_deg'] # rm_bc_decay, rm_dist_decay
+    params = [comm_dict.copy() for _ in range(len(add_names))]
+    params[1]['fast_query'] = True
+    params[2]['is_catboost'] = False
+    params[3]['elim_bc'] = False
+    params[4]['use_rep_bc'] = False
+    params[5]['use_rep_dr'] = False
+    params[6]['use_sel'] = 'deg'
+
+    # routine_eval(data_names=['cr', 'fb', 'gq'], dqm_names=['bcdr'], add_names=add_names, params=params, eval_type='all')
+    # routine_eval(data_names=['cr'], dqm_names=['bcdr']*len(add_names), add_names=add_names, params=params, eval_type='all')
+    routine_eval(data_names=['cr','fb','gq'], dqm_names=['bcdr']*len(add_names), add_names=add_names, params=params, eval_type='all')
+
+def routine_abla_bcdr_plus_large():
+
+    comm_dict = {
+        'emb_sz': 16,
+        'landmark_sz': 5,
+        'lr': 0.01,
+        'iters': 15,
+        'l': 40,
+        'k': 1,
+        'num_walks': 2,  # fine-tuned.
+        'num_workers': 12,
+        'batch_landmark_sz': 1,  # decrease when massive graphs for load balancing.
+        'batch_root_sz': 30000,
+        'bc_decay': 1,
+        'dist_decay': 0.35,  # fine-tuned.
+        'out_walks': 80,
+        'out_l': 5,
+        'use_sel': 'rnd',
+        'fast_query': False,
+        'is_catboost': True,
+        'catboost_comb': True,
+        'elim_bc': False,
+        'landmark_sz_for_catboost': 16,
+        'use_rep_bc': True,
+        'use_rep_dr': True,
+    }
+
+    add_names = ['default','rm_db_chk','rm_glb_feat','rm_loc_feat','rm_bc','rm_dr','sel_by_deg'] # rm_bc_decay, rm_dist_decay
+    params = [comm_dict.copy() for _ in range(len(add_names))]
+    params[1]['fast_query'] = True
+    params[2]['is_catboost'] = False
+    params[3]['elim_bc'] = False
+    params[4]['use_rep_bc'] = False
+    params[5]['use_rep_dr'] = False
+    params[6]['use_sel'] = 'deg'
+
+    # routine_eval(data_names=['cr', 'fb', 'gq'], dqm_names=['bcdr'], add_names=add_names, params=params, eval_type='all')
+    # routine_eval(data_names=['cr'], dqm_names=['bcdr']*len(add_names), add_names=add_names, params=params, eval_type='all')
+    routine_eval(data_names=['db'], dqm_names=['bcdr']*len(add_names), add_names=add_names, params=params, eval_type='all')
+
 def combine_routine_eval1():
     hyper_dict = {}
     hyper_dict['ado'] ={'k':2}
@@ -906,6 +985,8 @@ def routine_bfs_time():
         print(time_dict)
     print(time_dict)
 
+
+
 def rt_test_orthogonal():
     param_dicts = []
     with open('../tmp/test_config.txt') as f:
@@ -1022,6 +1103,7 @@ def make_significant():
     print('\n'.join([str(ele) for ele in lst]))
 
 
+
 if __name__ == '__main__':
     print('hello dqm routine.')
     # routine_eval(data_names=['cr','fb','gq'],dqm_names=['ls'],add_names=['k=2'],params=[{'k':2}],eval_type='all')
@@ -1045,6 +1127,9 @@ if __name__ == '__main__':
 
     # routine_eval_bcdr_plus()
     # routine_eval_bcdr_plus_large()
+
+    # routine_abla_bcdr_plus()
+    routine_abla_bcdr_plus_large()
 
     # dump_edge(data_names=['cr','fb','gq','db','yt','pk'])
     # rt_test_orthogonal()
