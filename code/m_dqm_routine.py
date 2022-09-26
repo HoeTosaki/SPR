@@ -871,7 +871,7 @@ def routine_sim_bn_test():
 
 def routine_sim_bn_test2d():
     # ps = [0.05,0.2,0.6]
-    ps = [0.05, 0.2]
+    ps = [0.05]
     # node_szs = [int(math.pow(2,ele+1)) for ele in range(15,20)]
     node_szs = [int(math.pow(2,ele+1)) for ele in range(16,20)]
     for idx,node_sz in enumerate(node_szs):
