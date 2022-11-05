@@ -533,8 +533,8 @@ def eval_bn_storage_fixed_p(ps = [0.05,0.2],ns=[1,12]):
     lss = ['-',':','-.']
     for idx,(p,ls) in enumerate(zip(ps,lss)):
         plt.plot(range(*ns),s_graph[idx],color='k',linestyle=ls,marker='o',label=f'p={p}, graph size')
-        plt.plot(range(*ns),s_ind[idx],color='coral',linestyle=ls,label=f'p={p}, exact representation')
-        plt.plot(range(*ns),s_emb[idx],color='dodgerblue',linestyle=ls,label=f'p={p}, approximate representation')
+        plt.plot(range(*ns),s_ind[idx],color='coral',linestyle=ls,marker='o',label=f'p={p}, exact representation')
+        plt.plot(range(*ns),s_emb[idx],color='dodgerblue',linestyle=ls,marker='o',label=f'p={p}, approximate representation')
 
     plt.xlabel('log |V|',fontsize=20)
     plt.ylabel('storage cost (MB)',fontsize=20)
@@ -561,8 +561,8 @@ def eval_bn_query_fixed_p(ps = [0.05,0.2],ns=[1,12]):
     plt.figure(figsize=(8,8))
     lss = ['-',':','-.']
     for idx,(p,ls) in enumerate(zip(ps,lss)):
-        plt.plot(range(*ns),q_ind[idx],color='coral',linestyle=ls,label=f'p={p}, exact representation')
-        plt.plot(range(*ns),q_emb[idx],color='dodgerblue',linestyle=ls,label=f'p={p}, approximate representation')
+        plt.plot(range(*ns),q_ind[idx],color='coral',linestyle=ls,marker='s',label=f'p={p}, exact representation')
+        plt.plot(range(*ns),q_emb[idx],color='dodgerblue',linestyle=ls,marker='s',label=f'p={p}, approximate representation')
 
     plt.xlabel('log |V|',fontsize=20)
     plt.ylabel('response time (ns)',fontsize=20)
@@ -581,20 +581,20 @@ if __name__ == '__main__':
     # eval_bn_storage()
     # eval_bn_query()
 
-    # eval_bn_storage_fixed_p(ps=[0.05])
-    eval_bn_query_fixed_p(ps = [0.05],ns=[1,15])
+    eval_bn_storage_fixed_p(ps=[0.05],ns=[1,18])
+    eval_bn_query_fixed_p(ps = [0.05],ns=[1,18])
     # eval_bn_storage1()
     # eval_bn_query1()
 
-    bntm = BNTestManager()
-
-    bntm.auto_add_g_sz()
-    bntm.auto_add_bc_ind()
-    bntm.auto_add_bc_qry()
-    bntm.auto_add_pll_qry()
-    bntm.auto_add_pll_ind()
-
-    bntm.print_stat()
+    # bntm = BNTestManager()
+    #
+    # bntm.auto_add_g_sz()
+    # bntm.auto_add_bc_ind()
+    # bntm.auto_add_bc_qry()
+    # bntm.auto_add_pll_qry()
+    # bntm.auto_add_pll_ind()
+    #
+    # bntm.print_stat()
 
     pass
 
