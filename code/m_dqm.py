@@ -2876,6 +2876,469 @@ class BCDR(DistanceQueryModel):
         self.embs = tc.from_numpy(np.load(load_dict['embs_path']))
         self.model = tc.load(load_dict['model_path'],map_location=device)
 
+class DistDecoder_RSP(nn.Module):
+    def __init__(self, emb_sz=16):
+        super(DistDecoder_RSP, self).__init__()
+        self.emb_sz = emb_sz
+        self.lin1 = nn.Linear(emb_sz * 2, emb_sz)
+        self.lin2 = nn.Linear(emb_sz, 1)
+
+    def forward(self, src, dst):
+        out = self.lin1(tc.cat((src, dst), dim=1))
+        out = F.relu(out)
+        out = self.lin2(out)
+        out = F.softplus(out)
+        return out
+
+class RSP(DistanceQueryModel):
+    def __init__(self,emb_sz=16,landmark_sz=100,lr=0.01,iters=15,l=80,num_walks=10,num_workers=8,batch_landmark_sz=5,batch_root_sz=20,bc_decay=10,dist_decay=0.98,out_walks=40,out_l=10,use_sel='rnd',fast_query=False,is_catboost=False,catboost_comb=False,landmark_sz_for_catboost=16,**kwargs):
+        super(RSP, self).__init__(**kwargs)
+        self.emb_sz = emb_sz
+        self.landmark_sz = landmark_sz
+        self.lr = lr
+        self.iters = iters
+        self.l = l
+        self.num_walks = num_walks
+        self.num_workers = num_workers
+        self.batch_landmark_sz = batch_landmark_sz
+        self.batch_root_sz = batch_root_sz
+        self.bc_decay = bc_decay
+        self.dist_decay = dist_decay
+        self.out_walks = out_walks
+        self.out_l = out_l
+        self.use_sel = use_sel
+        self.fast_query = fast_query
+        self.is_catboost=is_catboost
+        self.catboost_comb = catboost_comb
+        self.landmark_sz_for_catboost = landmark_sz_for_catboost
+        # self.storage_lst = [self.pwd() + '.json', self.pwd() + '.embs.npy',self.pwd()+'.model']
+        self.storage_lst = [self.pwd() + '.pkl']
+
+    def __str__(self):
+        return 'RSP:' + self.model_name
+
+    @staticmethod
+    def _s_gen_bc_pair(landmarks,nx_g,n,**kwargs):
+        # nx_g = nx.Graph()
+        # pid = kwargs['__PID__']
+        train_pairs_cb = []
+        bcs = np.zeros(shape=(n,))
+        for landmark,is_bc_used in landmarks:
+            if is_bc_used:
+                search_lst = [landmark]
+                dist_map = {landmark:0}
+                bcs[landmark] += 1
+                while len(search_lst) != 0:
+                    cur_nid = search_lst.pop(0)
+                    for nnid in nx_g.neighbors(cur_nid):
+                        if nnid not in dist_map:
+                            dist_map[nnid] = dist_map[cur_nid] + 1
+                            bcs[nnid] += 1 / dist_map[nnid]
+                            search_lst.append(nnid)
+                for nid in dist_map:
+                    if dist_map[nid] >= 1:
+                        train_pairs_bc.append([landmark,nid,dist_map[nid]])
+            else:
+                search_lst = [landmark]
+                dist_map = {landmark: 0}
+                while len(search_lst) != 0:
+                    cur_nid = search_lst.pop(0)
+                    for nnid in nx_g.neighbors(cur_nid):
+                        if nnid not in dist_map:
+                            dist_map[nnid] = dist_map[cur_nid] + 1
+                            search_lst.append(nnid)
+                for nid in dist_map:
+                    if dist_map[nid] >= 1:
+                        train_pairs_cb.append([landmark, nid, dist_map[nid]])
+        return train_pairs_bc,bcs,train_pairs_cb
+
+    @staticmethod
+    def _s_gen_bc_walk(roots,nx_g,num_walks,l,bcs,bc_decay,out_walks,out_l,dist_decay,use_rep_bc,use_rep_dr, **kwargs):
+        # nx_g = nx.Graph()
+        # pid = kwargs['__PID__']
+        total_walks = []
+        for root in roots:
+            cnt_map = {}
+            dist_map = {root:0}
+            for _ in range(num_walks):
+                search_set = {root}
+                cur_nid = root
+                cur_l = 0
+                while cur_l < l:
+                    cur_cands = []
+                    cur_probs = []
+                    # update distance.
+                    for nnid in nx_g.neighbors(cur_nid):
+                        if nnid not in search_set:
+                            cur_cands.append(nnid)
+                            cur_probs.append(bcs[nnid]*(2 - math.tanh(bc_decay - cnt_map.get(nnid,0)))) # bc decay.
+                            if nnid in dist_map: # bc random tree.
+                                dist_map[nnid] = min(dist_map[cur_nid] + 1,dist_map[nnid])
+                            else:
+                                dist_map[nnid] = dist_map[cur_nid] + 1
+                    l_cur_cands = len(cur_cands)
+                    # update next nid.
+                    if  l_cur_cands >= 2:
+                        if use_rep_bc:
+                            cur_probs = np.array(cur_probs)
+                            cur_probs /= np.sum(cur_probs)
+                            cur_nid = int(np.random.choice(a=cur_cands,size=1,p=cur_probs)[0])
+                        else:
+                            cur_nid = int(np.random.choice(a=cur_cands, size=1, p=None)[0])
+                    elif l_cur_cands == 1:
+                        cur_nid = cur_cands[0]
+                    else:
+                        cnt_map[cur_nid] = 100
+                        break
+                    search_set.add(cur_nid)
+                    cnt_map[cur_nid] = cnt_map.get(cur_nid,0) + 1
+                    cur_l += 1
+            dist_map.pop(root)
+            total_cands = list(dist_map.keys())
+            if use_rep_dr:
+                total_probs = np.power(dist_decay,np.array(list(dist_map.values()))) * bcs[total_cands]
+                total_probs /= np.sum(total_probs)
+                walks = np.random.choice(a=total_cands, size=(out_walks, out_l), replace=True,p=total_probs) # TODO:replace is False?
+            else:
+                walks = np.random.choice(a=total_cands, size=(out_walks, out_l), replace=True, p=None)
+            root_cols = np.array([root] * out_walks).reshape(-1,1)
+            walks = np.concatenate([root_cols,walks],axis=1)
+            total_walks.append(walks)
+
+        return np.concatenate(total_walks,axis=0)
+
+    def _generate(self):
+        # self.nx_g = nx.DiGraph()
+        # gen train pairs & centrality score.
+        mpm = utils.MPManager(batch_sz=self.batch_landmark_sz,num_workers=self.num_workers,use_shuffle=False)
+        nodes = list(self.nx_g.nodes())
+        n = len(nodes)
+        assert self.landmark_sz_for_catboost >= self.landmark_sz
+        if self.use_sel == 'rnd':
+            random.shuffle(nodes)  # TODO: big deg landmarks?
+            # landmarks = nodes[:self.landmark_sz]
+            landmarks = nodes[:self.landmark_sz_for_catboost]
+        elif self.use_sel == 'deg':
+            deg_dict = dict(self.nx_g.degree)
+
+            # landmarks = np.argsort([deg_dict[nid] for nid in range(n)])[-self.landmark_sz:] # since nid just == idx.
+            landmarks = np.argsort([deg_dict[nid] for nid in range(n)])[-self.landmark_sz_for_catboost:]  # since nid just == idx.
+            landmarks = nodes[:self.landmark_sz_for_catboost]
+            # landmarks = np.array(nodes)[idx_deg]
+            # landmarks = sorted([deg_dict[nid] for nid in range(n)],reverse=True)[:self.landmark_sz]
+        else:
+            raise ValueError
+        landmarks = [(lm,True if idx < self.landmark_sz else False) for idx,lm in enumerate(landmarks)]
+        ret_dict = mpm.multi_proc(RSP._s_gen_bc_pair,[landmarks],nx_g=self.nx_g,n=n,auto_concat=False)
+        train_pairs_bc = []
+        train_pairs_cb = []
+        bcs = np.zeros(shape=(n,))
+        for k, v in ret_dict.items():
+            train_pairs_bc.extend(v[0])
+            bcs += v[1]
+            train_pairs_cb.extend(v[2])
+        train_pairs = tc.FloatTensor(train_pairs_bc)
+
+
+        # run bc random walk tree.
+        mpm = utils.MPManager(batch_sz=self.batch_root_sz, num_workers=self.num_workers, use_shuffle=False)
+        random.shuffle(nodes)
+        ret_dict = mpm.multi_proc(RSP._s_gen_bc_walk,[nodes],nx_g=self.nx_g,num_walks=self.num_walks,l=self.l,bcs=bcs,bc_decay=self.bc_decay,out_walks=self.out_walks,out_l=self.out_l,dist_decay=self.dist_decay,use_rep_bc=self.use_rep_bc,use_rep_dr=self.use_rep_dr,auto_concat=False)
+        walks = []
+        [walks.append(ele) for ele in ret_dict.values()]
+        walks = np.concatenate(walks,axis=0)
+        ret_walks = []
+        for walk in walks:
+            ret_walks.append([str(ele) for ele in walk])
+
+        # train embs with Word2Vec.
+        print('{} start to train embeddings with Word2Vec...'.format(self))
+        st_time = time.time()
+        model = gs.models.Word2Vec(ret_walks, vector_size=self.emb_sz, window=walks.shape[1], min_count=0, sg=1,workers=self.num_workers)
+        # model = gs.models.Word2Vec(walks, vector_size=self.emb_sz, window=walks.shape[0], min_count=0, sg=1, hs=0, negative=5,workers=self.num_workers)
+        self.embs = tc.FloatTensor([model.wv[str(ele)] for ele in range(n)])
+        print('{} train embeddings finished with time {:.4f}s'.format(self,time.time()-st_time))
+
+        # train Distance Decoder.
+        st_time = time.time()
+        if self.is_catboost:
+            print('{} start to train CatBoost Distance Decoder...'.format(self))
+            low_embs = np.zeros(shape=(self.nx_g.number_of_nodes(), 16))
+            lid2cid = {}
+            train_pairs_cb.extend(train_pairs_bc)
+            for idx, (lid,is_bc_use) in enumerate(landmarks[:low_embs.shape[1]]): # use the dim of low emb, might be uncorresponded with landmark_sz
+                lid2cid[lid] = idx
+            if self.landmark_sz > 16:
+                # need sel a subset of landmarks at size=16.
+                for lid, nid, dist in train_pairs_cb:
+                    if lid in lid2cid:
+                        low_embs[nid, lid2cid[lid]] = dist
+            else:
+                for lid, nid, dist in train_pairs_cb:
+                    low_embs[nid, lid2cid[lid]] = dist
+            low_embs = tc.FloatTensor(low_embs)
+            # self.embs = tc.concat([self.embs,low_embs],dim=1)
+            # self.embs = tc.concat([low_embs], dim=1)
+            if not self.catboost_comb:
+                self.embs = tc.concat([self.embs, low_embs], dim=1)
+                random.shuffle(train_pairs_cb)
+                train_pairs = train_pairs_cb[:int(math.ceil(self.embs.shape[0] * 0.04))]
+                # train_sz = int(len(train_pairs)*self.train_valid_split)
+                train_pairs = np.array(train_pairs, dtype=np.int)
+                train_data = np.concatenate([self.embs[train_pairs[:, 0]], self.embs[train_pairs[:, 1]]], axis=1)
+                train_dist = train_pairs[:, 2].reshape(-1)
+
+                self.cb1 = CatBoostRegressor()
+                self.cb2 = CatBoostRegressor()
+                # param_grid = {'learning_rate': [0.03, 0.1],'depth': [4, 6, 10],'l2_leaf_reg': [1, 3, 5, 7, 9]}
+
+                param_grid = {'iterations': [500], 'learning_rate': [0.03, 0.1], 'depth': [4, 6, 10],
+                              'l2_leaf_reg': [1, 5, 9]}
+
+                self.cb1.grid_search(param_grid=param_grid, X=train_data, y=train_dist, plot=False)
+                # self.cb1.fit(X=train_data, y=train_dist)
+                pred_dist = self.cb1.predict(train_data).reshape(-1, 1)
+                train_data = np.concatenate([train_data, pred_dist], axis=1)
+                self.cb2.grid_search(param_grid=param_grid, X=train_data, y=train_dist, plot=False)
+                # self.cb2.fit(X=train_data, y=train_dist)
+            else:
+                print('{} start to train NN Distance Decoder...'.format(self))
+                self.model = DistDecoder_RSP(emb_sz=self.emb_sz)
+                loss = nn.MSELoss(reduction='sum')
+                optim = tc.optim.Adam(self.model.parameters(), lr=self.lr)
+                self.model.to(device)
+                pair_idx = list(range(len(train_pairs)))
+                if not self.elim_bc:
+                    self.model.train()
+                    for e_iter in range(self.iters):
+                        random.shuffle(pair_idx)
+                        train_pairs = train_pairs[pair_idx]
+                        train_batch_sz = 128
+                        pnt = 0
+                        train_loss = 0.
+                        cur_len = 0
+                        while pnt < len(train_pairs):
+                            optim.zero_grad()
+                            batch_idx = pnt, min(pnt + train_batch_sz, len(train_pairs))
+                            pnt += batch_idx[1] - batch_idx[0]
+                            batch_in = train_pairs[batch_idx[0]:batch_idx[1]]
+                            srcs = batch_in[:, 0].long()
+                            dsts = batch_in[:, 1].long()
+                            dists = batch_in[:, 2].float()
+                            emb_srcs = self.embs[srcs]
+                            emb_dsts = self.embs[dsts]
+                            dists = dists.to(device)
+                            emb_srcs = emb_srcs.to(device)
+                            emb_dsts = emb_dsts.to(device)
+                            pred_dists = self.model(emb_srcs, emb_dsts)
+                            batch_loss = loss(pred_dists, dists.view(-1, 1))
+                            batch_loss.backward()
+                            optim.step()
+                            train_loss += batch_loss.item()
+                            print('\titer {} | batch {}/{} | loss:{:.5f}'.format(e_iter, pnt, len(train_pairs),
+                                                                                 train_loss / pnt))
+                        print('iter {} finished | loss:{:.5f}'.format(e_iter, train_loss / pnt))
+                    print('{} train NN Distance Decoder finished with time {:.4f}s'.format(self, time.time() - st_time))
+                else:
+                    pass
+                random.shuffle(train_pairs_cb)
+                train_pairs = train_pairs_cb[:int(math.ceil(self.embs.shape[0] * 0.04))]
+                # train_sz = int(len(train_pairs)*self.train_valid_split)
+                train_pairs = np.array(train_pairs, dtype=np.int)
+                pred_dist_nn = self.model(self.embs[train_pairs[:, 0]], self.embs[train_pairs[:, 1]])
+                pred_dist_nn = np.array(pred_dist_nn.detach().numpy()).reshape(-1,1)
+                self.low_embs = low_embs
+                train_data = np.concatenate([self.low_embs[train_pairs[:, 0]], self.low_embs[train_pairs[:, 1]]], axis=1)
+                train_dist = train_pairs[:, 2].reshape(-1)
+                self.cb1 = CatBoostRegressor()
+                self.cb2 = CatBoostRegressor()
+                # param_grid = {'learning_rate': [0.03, 0.1],'depth': [4, 6, 10],'l2_leaf_reg': [1, 3, 5, 7, 9]}
+
+                param_grid = {'iterations': [100], 'learning_rate': [0.03, 0.1], 'depth': [4, 6, 10],
+                              'l2_leaf_reg': [1, 5, 9]}
+
+                self.cb1.grid_search(param_grid=param_grid, X=train_data, y=train_dist, plot=False)
+                # self.cb1.fit(X=train_data, y=train_dist)
+                pred_dist = self.cb1.predict(train_data).reshape(-1, 1)
+                if not self.elim_bc:
+                    train_data = np.concatenate([train_data, pred_dist,pred_dist_nn], axis=1)
+                else:
+                    train_data = np.concatenate([train_data, pred_dist], axis=1)
+                self.cb2.grid_search(param_grid=param_grid, X=train_data, y=train_dist, plot=False)
+                # self.cb2.fit(X=train_data, y=train_dist)
+
+            print('{} train CatBoost Distance Decoder finished with time {:.4f}s'.format(self, time.time() - st_time))
+        else:
+            print('{} start to train NN Distance Decoder...'.format(self))
+            self.model = DistDecoder_RSP(emb_sz=self.emb_sz)
+            loss = nn.MSELoss(reduction='sum')
+            optim = tc.optim.Adam(self.model.parameters(), lr=self.lr)
+            self.model.to(device)
+            pair_idx = list(range(len(train_pairs)))
+            self.model.train()
+            for e_iter in range(self.iters):
+                random.shuffle(pair_idx)
+                train_pairs = train_pairs[pair_idx]
+                train_batch_sz = 128
+                pnt = 0
+                train_loss = 0.
+                cur_len = 0
+                while pnt < len(train_pairs):
+                    optim.zero_grad()
+                    batch_idx = pnt,min(pnt + train_batch_sz,len(train_pairs))
+                    pnt += batch_idx[1] - batch_idx[0]
+                    batch_in = train_pairs[batch_idx[0]:batch_idx[1]]
+                    srcs = batch_in[:,0].long()
+                    dsts = batch_in[:,1].long()
+                    dists = batch_in[:,2].float()
+                    emb_srcs = self.embs[srcs]
+                    emb_dsts = self.embs[dsts]
+                    dists = dists.to(device)
+                    emb_srcs = emb_srcs.to(device)
+                    emb_dsts = emb_dsts.to(device)
+                    pred_dists = self.model(emb_srcs,emb_dsts)
+                    batch_loss = loss(pred_dists,dists.view(-1,1))
+                    batch_loss.backward()
+                    optim.step()
+                    train_loss += batch_loss.item()
+                    print('\titer {} | batch {}/{} | loss:{:.5f}'.format(e_iter,pnt,len(train_pairs),train_loss / pnt))
+                print('iter {} finished | loss:{:.5f}'.format(e_iter,train_loss / pnt))
+            print('{} train NN Distance Decoder finished with time {:.4f}s'.format(self,time.time() - st_time))
+        self._save_param_pickle()
+
+        ed_time = time.time()
+
+        # anal mem.
+        self.train_var_lst.append(self.embs)
+        self.train_var_lst.append(list(self.nx_g.edges()))
+        self.train_var_lst.append(train_pairs)
+        self.train_var_lst.append(landmarks)
+        if self.is_catboost:
+            cb1_params = self.cb1.get_params()
+            cb2_params = self.cb2.get_params()
+            for k in cb1_params:
+                self.train_var_lst.append(cb1_params[k])
+            for k in cb2_params:
+                self.train_var_lst.append(cb2_params[k])
+            if self.catboost_comb:
+                for p in self.model.parameters():
+                    self.train_var_lst.append(p)  # inner torch parameters.
+        else:
+            for p in self.model.parameters():
+                self.train_var_lst.append(p) # inner torch parameters.
+        return ed_time
+
+    def _load(self):
+        if not os.path.exists(self.pwd()+'.pkl'):
+            return False
+        self._load_param_pickle()
+        return True
+
+    def _query(self,srcs,dsts):
+        if self.is_catboost:
+            srcs = np.array(srcs)
+            dsts = np.array(dsts)
+            if not self.catboost_comb:
+                query_embs = np.concatenate([self.embs[srcs], self.embs[dsts]], axis=1)
+                query_dist = self.cb1.predict(query_embs).reshape(-1, 1)
+                query_embs = np.concatenate([query_embs, query_dist], axis=1)
+                query_dist = tc.FloatTensor(self.cb2.predict(query_embs))
+            else:
+                query_embs = np.concatenate([self.low_embs[srcs], self.low_embs[dsts]], axis=1)
+                emb_srcs = self.embs[srcs].to(device)
+                emb_dsts = self.embs[dsts].to(device)
+                query_dist = self.cb1.predict(query_embs).reshape(-1, 1)
+                query_dist_nn = self.model(emb_srcs, emb_dsts).detach().numpy().reshape(-1,1)
+                if not self.elim_bc:
+                    query_embs = np.concatenate([query_embs, query_dist,query_dist_nn], axis=1)
+                else:
+                    query_embs = np.concatenate([query_embs, query_dist], axis=1)
+                query_dist = tc.FloatTensor(self.cb2.predict(query_embs))
+            if not self.fast_query:
+                # verified by neighborhoods.
+                for idx in range(srcs.shape[0]):
+                    if int(srcs[idx]) == int(dsts[idx]):
+                        query_dist[idx] = 0.
+                    elif int(dsts[idx]) in set(self.nx_g.neighbors(int(srcs[idx]))):
+                        query_dist[idx] = 1.
+            ed_time = time.time()
+        else:
+            emb_srcs = self.embs[srcs].to(device)
+            emb_dsts = self.embs[dsts].to(device)
+            dists = self.model(emb_srcs, emb_dsts)
+            if not self.fast_query:
+                # verified by neighborhoods.
+                for idx in range(srcs.shape[0]):
+                    if int(srcs[idx]) == int(dsts[idx]):
+                        dists[idx] = 0.
+                    elif int(dsts[idx]) in set(self.nx_g.neighbors(int(srcs[idx]))):
+                        dists[idx] = 1.
+
+            ed_time = time.time()
+
+        self.query_var_lst = []
+        self.query_var_lst.append(self.embs)
+        if self.is_catboost:
+            self.query_var_lst.append(query_dist)
+            cb1_params = self.cb1.get_params()
+            cb2_params = self.cb2.get_params()
+            for k in cb1_params:
+                self.query_var_lst.append(cb1_params[k])
+            for k in cb2_params:
+                self.query_var_lst.append(cb2_params[k])
+            if self.catboost_comb:
+                for p in self.model.parameters():
+                    self.query_var_lst.append(p)  # inner torch parameters.
+        else:
+            self.query_var_lst.append(self.model)
+            for p in self.model.parameters():
+                self.query_var_lst.append(p) # inner torch parameters.
+        if not self.fast_query:
+            self.query_var_lst.append(list(self.nx_g.edges()))
+
+        if self.is_catboost:
+            return query_dist,ed_time
+        else:
+            return dists.view(-1),ed_time
+
+    def _save_param(self):
+        save_dict = {'embs_path': self.pwd() + '.embs.npy','model_path':self.pwd()+'.model'}
+        with open(self.pwd() + '.json', 'w') as f:
+            json.dump(save_dict, f)
+        np.save(self.pwd() + '.embs.npy', self.embs.numpy())
+        tc.save(self.model,self.pwd()+'.model')
+
+    def _save_param_pickle(self):
+        with open(self.pwd() + '.pkl', 'wb') as f:
+            pk.dump(self.embs, f)
+            if self.is_catboost:
+                pk.dump(self.cb1, f)
+                pk.dump(self.cb2, f)
+                if self.catboost_comb:
+                    pk.dump(self.model, f)
+                    pk.dump(self.low_embs,f)
+            else:
+                pk.dump(self.model,f)
+
+    def _load_param_pickle(self):
+        with open(self.pwd() + '.pkl', 'rb') as f:
+            self.embs = pk.load(f)
+            if self.is_catboost:
+                self.cb1 = pk.load(f)
+                self.cb2 = pk.load(f)
+                if self.catboost_comb:
+                    self.model = pk.load(f)
+                    self.low_embs = pk.load(f)
+            else:
+                self.model = pk.load(f)
+
+
+    def _load_param(self):
+        with open(self.pwd() + '.json', 'r') as f:
+            load_dict = json.load(f)
+        assert load_dict is not None, print('cur path:{}'.format(self.pwd()))
+        self.embs = tc.from_numpy(np.load(load_dict['embs_path']))
+        self.model = tc.load(load_dict['model_path'],map_location=device)
 
 
 
